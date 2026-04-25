@@ -53,7 +53,14 @@ In `local` mode the nodes publish themselves over **mDNS** on the LAN and join e
 | `HYDRA_GOSSIP_PORT` | `7946` | Gossip port (UDP + TCP). |
 | `HYDRA_GOSSIP_SEEDS` | — | Comma-separated `host:port` list of static seeds. |
 | `HYDRA_GOSSIP_REJOIN_INTERVAL` | `15s` | Background auto-join tick; re-resolves seeds and heals split-brains. |
+| `HYDRA_GOSSIP_SECRET` | — | Hex-encoded AES key. Must decode to 16/24/32 bytes (AES-128/192/256). Empty disables gossip encryption — peers with different values cannot join. Generate with `openssl rand -hex 16`. |
 | `HYDRA_CLUSTER_TAG` | `hydra` | Logical mesh tag; used by discovery providers to filter peers. |
+
+### Proxy
+
+| Variable | Default | Description |
+|---|---|---|
+| `HYDRA_STRIP_HEADERS` | — | Comma-separated list of request headers to remove before forwarding to the upstream (e.g. `Authorization,Cookie`). Control-plane headers (`X-Hydra-Hop`, `X-Entity-ID`) are always stripped regardless. |
 
 ### AWS Cloud Map (only when `ENVIRONMENT=aws`)
 
@@ -75,6 +82,12 @@ Set `ENVIRONMENT=aws`. The node will:
 3. List the Cloud Map service to discover peer IPs and `Join` them.
 4. Gossip heartbeats + topology over memberlist from then on.
 5. Deregister from Cloud Map on graceful shutdown.
+
+**Set `HYDRA_GOSSIP_SECRET` in production** (same value on every peer)
+so the gossip channel is AES-encrypted and only authorized nodes can
+join. Without it, anything that can reach port `7946/udp` in the VPC
+can join the cluster and hijack the hash ring. Store the key in AWS
+Secrets Manager or SSM Parameter Store and inject it at startup.
 
 ### IAM policy
 
@@ -126,11 +139,20 @@ on the instance; IMDSv1-only instances will fail to start.
 
 ## HTTP endpoints
 
-All endpoints go through the control-plane server on `CONTROL_PORT`.
+The control-plane listens on `CONTROL_PORT` (default `9090`):
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/nodes` | Returns the local node + every peer known to memberlist. Each node carries its full `topology.Node` (interfaces, MAC, ports, last-seen, health) decoded from the peer's gossiped `NodeMeta`. |
+
+The forward proxy data-plane listens on `BASE_PORT` (+1 per extra NIC). It
+accepts standard HTTP forward-proxy and CONNECT requests, honoring these
+request headers:
+
+| Header | Purpose |
+|---|---|
+| `X-Entity-ID` | Opaque identifier the router hashes to pick an owner in the consistent hash ring. If absent, the request is always processed locally. |
+| `X-Hydra-Hop` | Set internally to `1` when a peer forwards a request; receivers treat it as "do not re-route" to avoid ping-pong loops. Never set this from a client. |
 
 ---
 
