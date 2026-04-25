@@ -1,0 +1,19 @@
+# memberlist-basic — endpoints del API HTTP
+# Arranca un nodo con: ./memberlist-basic --provider=local --http-addr=:8080
+
+@host = http://127.0.0.1:9090
+
+### Snapshot JSON de miembros activos del clúster
+GET {{host}}/api/nodes
+Accept: application/json
+
+
+### Stream SSE de eventos de membresía (join/leave/update)
+# Deja esta request abierta: el cliente recibe primero una ráfaga de
+# "snapshot" con el estado actual y luego streaming de transiciones en vivo.
+# En VS Code/IntelliJ la respuesta se muestra token por token conforme llegan.
+GET {{host}}/events
+Accept: text/event-stream
+
+
+### proxy loccl

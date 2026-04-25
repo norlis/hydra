@@ -1,0 +1,271 @@
+# Documentación: https://golangci-lint.run/docs/configuration/file/
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.25"
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+  tests: true
+  build-tags:
+    - integration
+
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+    - gofumpt
+    - gci
+
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+      skip-generated: true
+      custom-order: true
+
+    gofumpt:
+      extra-rules: true
+#      module-path: ..
+
+# === LINTERS ===
+linters:
+  default: none  # Empezar desde cero
+
+  enable:
+    # === Core & Bugs (Habilitados por defecto) ===
+    - errcheck       # Errors no manejados
+    - govet          # Análisis oficial de Go
+    - ineffassign    # Asignaciones ineficientes
+    - staticcheck    # Incluye gosimple y unused automáticamente
+    - unused         # Código no utilizado
+
+    # === Seguridad ===
+    - gosec          # Seguridad (G101-G604)
+    - errchkjson     # JSON encoding errors
+    - errorlint      # Error wrapping Go 1.13+
+
+    # === Estilo ===
+    - misspell       # Errores ortográficos
+    - godot          # Comentarios terminan en punto
+    - whitespace     # Espacios en blanco
+    - tagalign       # Alineación de struct tags
+
+    # === Complejidad ===
+    - gocyclo        # Complejidad ciclomática
+    - funlen         # Longitud de funciones
+    - nestif         # Ifs anidados
+    - cyclop         # Complejidad de paquetes
+    - maintidx       # Índice de mantenibilidad
+
+    # === Bugs y errores comunes ===
+    - bodyclose      # HTTP response body sin cerrar
+    - noctx          # HTTP requests sin context
+    - sqlclosecheck  # SQL rows/statements sin cerrar
+    - rowserrcheck   # SQL rows.Err() no verificado
+    - nilerr         # Return nil error incorrectamente
+    - nilnil         # Return nil,nil simultáneo
+    - nolintlint     # Valida directivas //nolint
+
+    # === Testing ===
+    - testifylint    # Mejores prácticas testify
+    - tparallel      # t.Parallel() mal usado
+    - paralleltest   # Detecta tests que deberían usar t.Parallel()
+
+    # === Moderno y mejores prácticas (Go 1.22+) ===
+#    - revive         # Linter configurable
+    - gocritic       # Más de 100 checkers
+    - perfsprint     # Optimizaciones de sprintf
+    - copyloopvar    # Go 1.22+ loop var behavior
+    - intrange       # Go 1.22+ integer range loops
+    - sloglint       # Estilo consistente log/slog
+    - spancheck      # OpenTelemetry spans
+    - wrapcheck      # Error wrapping
+
+    # === Optimizaciones ===
+    - unconvert      # Conversiones innecesarias
+    - unparam        # Parámetros no usados
+    - wastedassign   # Asignaciones desperdiciadas
+    - prealloc       # Slices pre-allocables
+
+    # === Go modules y dependencias ===
+    - gomoddirectives # Valida go.mod
+    - depguard       # Control de imports
+
+    # === future
+    - modernize
+
+  settings:
+    # Complejidad ciclomática
+    gocyclo:
+      min-complexity: 15
+
+    # Complejidad de paquetes
+    cyclop:
+      max-complexity: 15
+      package-average: 10.0
+
+    # Longitud de funciones
+    funlen:
+      lines: 100
+      statements: 50
+      ignore-comments: true
+
+    # Ifs anidados
+    nestif:
+      min-complexity: 4
+
+    # Índice de mantenibilidad
+    maintidx:
+      under: 20
+
+    # Seguridad
+    gosec:
+      excludes:
+        - G104  # Errors no verificados (usa errcheck)
+
+    # Revive
+    revive:
+      severity: warning
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+          disabled: true
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+          disabled: true
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    # Go critic
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+        - experimental
+      disabled-checks:
+        - whyNoLint
+        - hugeParam
+        - rangeValCopy
+        - exitAfterDefer
+        - commentedOutCode
+
+    # Depguard - Control de imports
+    depguard:
+      rules:
+        main:
+          files:
+            - "!**/*_test.go"
+          deny:
+            - pkg: "io/ioutil"
+              desc: "Deprecated desde Go 1.16, usa 'io' o 'os'"
+            - pkg: "github.com/pkg/errors"
+              desc: "Usa errors estándar de Go con fmt.Errorf y %w"
+
+    # Error lint
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    # Wrapcheck
+    wrapcheck:
+      ignoreSigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - .Wrap(
+        - .Wrapf(
+      ignorePackageGlobs:
+        - encoding/*
+        - github.com/go-chi/*
+
+    # Tag align
+    tagalign:
+      align: true
+      sort: true
+
+  exclusions:
+    # Excluir directorios completos de todos los linters
+    paths:
+      - cmd/example
+
+    rules:
+      # Excluir tests de algunos linters
+      - path: _test\.go
+        linters:
+          - funlen
+          - gocyclo
+          - cyclop
+          - maintidx
+          - errcheck
+          - gosec
+          - wrapcheck
+          - varnamelen
+
+      # Excluir archivos generados
+      - path: "(.*)?_gen\\.go"
+        linters:
+          - all
+
+      # Excluir mocks
+      - path: ".*mock.*\\.go"
+        linters:
+          - all
+
+      # Excluir código de swagger/docs
+      - path: "docs/.*"
+        linters:
+          - all
+
+      # Excluir main.go de algunas reglas
+      - path: "cmd/.*/main\\.go"
+        linters:
+          - errcheck
+
+      # Ignorar G104 de gosec (ya cubierto por errcheck)
+      - text: "G104"
+        linters:
+          - gosec
+
+# === ISSUES ===
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
+  fix: false
+
+# === SEVERITY ===
+severity:
+  default: error
+
+# === OUTPUT ===
+output:
+  formats:
+    colored-line-number:
+      path: stdout
+  print-issued-lines: true
+  print-linter-name: true
+  sort-order:
+    - file
