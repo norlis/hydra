@@ -231,7 +231,7 @@ func (h *TopologyHandler) Events(w http.ResponseWriter, r *http.Request) {
 		case <-keepAliveTicker.C:
 			// Send an SSE comment. The browser ignores it silently,
 			// but it tricks the Load Balancer into keeping the TCP connection alive.
-			_, err := w.Write([]byte(":keepalive\n\n"))
+			_, err := w.Write([]byte(":ping\n\n"))
 			if err != nil {
 				// If ping write fails, the connection is physically broken
 				h.logger.Debug("failed to write keep-alive ping, dropping client", zap.Error(err))

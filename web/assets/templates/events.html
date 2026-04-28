@@ -21,8 +21,6 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
           rel="stylesheet">
 
-    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.2/sse.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     <style>
@@ -76,11 +74,6 @@
 </head>
 <body class="min-h-screen text-gray-200 font-mono">
 
-<div hx-ext="sse" sse-connect="/api/events" hx-swap="none">
-    <div sse-swap="node.joined"></div>
-    <div sse-swap="node.updated"></div>
-    <div sse-swap="node.left"></div>
-</div>
 
 <div class="container mx-auto max-w-7xl p-4 sm:p-6" x-data>
 
@@ -189,9 +182,45 @@
             nodesMap: {},
             proxiesList: [],
             testStates: {},
+            connected: false,
+            _proxyTimeout: null,
 
             async init() {
                 await this.refreshAll();
+                this._connectSSE();
+            },
+
+            _connectSSE() {
+                const sse = new EventSource('/api/events');
+
+                sse.addEventListener('node.joined',  (e) => this._upsert(e));
+                sse.addEventListener('node.updated', (e) => this._upsert(e));
+                sse.addEventListener('node.left',    (e) => {
+                    const node = JSON.parse(e.data);
+                    delete this.nodesMap[node.id];
+                    this.scheduleProxyRefresh();
+                });
+
+                sse.onopen  = () => { this.connected = true; };
+                sse.onerror = () => { this.connected = false; };
+            },
+
+            _upsert(e) {
+                const node = JSON.parse(e.data);
+                this.nodesMap[node.id] = node;
+                this.scheduleProxyRefresh();
+            },
+
+            scheduleProxyRefresh() {
+                if (this._proxyTimeout) clearTimeout(this._proxyTimeout);
+                this._proxyTimeout = setTimeout(async () => {
+                    try {
+                        const res = await fetch('/api/proxies');
+                        if (res.ok) this.proxiesList = await res.json();
+                    } catch (e) {
+                        console.error('Failed to refresh proxies', e);
+                    }
+                }, 300);
             },
 
             async refreshAll() {
@@ -199,13 +228,12 @@
                     const [nRes, pRes] = await Promise.all([fetch('/api/nodes'), fetch('/api/proxies')]);
                     if (nRes.ok) {
                         const nodes = await nRes.json();
-                        const newMap = {};
-                        nodes.forEach(n => newMap[n.id] = n);
-                        this.nodesMap = newMap;
+                        this.nodesMap = {};
+                        nodes.forEach(n => { this.nodesMap[n.id] = n; });
                     }
                     if (pRes.ok) this.proxiesList = await pRes.json();
                 } catch (e) {
-                    console.error("Initial load failed", e);
+                    console.error('Initial load failed', e);
                 }
             },
 
@@ -219,59 +247,41 @@
                     if (!groups[p.node_id]) groups[p.node_id] = [];
                     groups[p.node_id].push(p);
                 });
-                return Object.keys(groups).sort().map(id => ({nodeId: id, proxies: groups[id]}));
+                return Object.keys(groups).sort().map(id => ({ nodeId: id, proxies: groups[id] }));
             },
 
             async testProxy(address) {
-                this.testStates = {...this.testStates, [address]: {status: 'testing', result: ''}};
+                this.testStates[address] = { status: 'testing', result: '' };
                 try {
-                    const res = await fetch(`/api/proxies/test?address=${encodeURIComponent(address)}`);
+                    const res  = await fetch(`/api/proxies/test?address=${encodeURIComponent(address)}`);
                     const data = await res.json();
-                    this.testStates = {
-                        ...this.testStates, [address]: {
-                            status: data.success ? 'success' : 'error',
-                            result: data.success ? data.ip : data.error
-                        }
+                    this.testStates[address] = {
+                        status: data.success ? 'success' : 'error',
+                        result: data.success ? data.ip : data.error,
                     };
                 } catch (e) {
-                    this.testStates = {...this.testStates, [address]: {status: 'error', result: e.message}};
+                    this.testStates[address] = { status: 'error', result: e.message };
                 }
             },
 
             formatLastSeen(ts) {
                 if (!ts) return '—';
-                return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+                return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             },
 
             getPrimaryIP(n) {
-                return (n.interfaces && n.interfaces[0]) ? n.interfaces[0].private_ip : 'N/A';
+                return n.interfaces?.[0]?.private_ip ?? 'N/A';
             },
 
             getPublicIP(n) {
-                return (n.interfaces && n.interfaces[0]?.public_ip) ? n.interfaces[0].public_ip : null;
+                return n.interfaces?.[0]?.public_ip ?? null;
             },
 
             getAllPorts(n) {
-                if (!n.interfaces) return '—';
-                const ports = n.interfaces.map(i => i.service_port).filter(p => p > 0);
-                return ports.length > 0 ? ports.join(', ') : '—';
-            }
+                const ports = (n.interfaces ?? []).map(i => i.service_port).filter(p => p > 0);
+                return ports.length ? ports.join(', ') : '—';
+            },
         });
-    });
-
-    document.body.addEventListener('htmx:sseMessage', function (e) {
-        const type = e.detail.type;
-        if (!type || type === 'message') return;
-        const store = Alpine.store('cluster');
-        if (type === 'node.left') {
-            const nodeData = JSON.parse(e.detail.data);
-            const newMap = {...store.nodesMap};
-            delete newMap[nodeData.id];
-            store.nodesMap = newMap;
-        } else {
-            store.nodesMap = {...store.nodesMap, [JSON.parse(e.detail.data).id]: JSON.parse(e.detail.data)};
-        }
-        fetch('/api/proxies').then(r => r.json()).then(data => store.proxiesList = data);
     });
 </script>
 </body>
