@@ -19,6 +19,7 @@ type Params struct {
 	Logger               *zap.Logger
 	Render               presenters.Presenters
 	TopologyHandler      *handlers.TopologyHandler
+	WebHandler           *handlers.WebHandler
 	NodeReadinessChecker *cluster.NodeReadinessChecker
 }
 
@@ -52,10 +53,18 @@ func NewHttpApi(params Params) {
 	api.HandleFunc("GET /api/nodes", params.TopologyHandler.Nodes)
 	api.HandleFunc("GET /api/proxies", params.TopologyHandler.Proxies)
 
+	params.Router.Handle("/api/", use(api))
+
+	// SSE: registered directly to bypass response-buffering middleware that
+	// wraps ResponseWriter without implementing http.Flusher / Unwrap.
+	params.Router.HandleFunc("GET /api/events", params.TopologyHandler.Events)
+
+	// UI
+	params.Router.HandleFunc("GET /events", params.WebHandler.EventsPage)
+	params.Router.Handle("GET /assets/", http.StripPrefix("/assets/", params.WebHandler.ServeAssets()))
+
+	// health
 	params.Router.Handle("GET /health", use(health.NewProbe(map[string]port.Checker{
 		"node": params.NodeReadinessChecker,
 	})))
-	params.Router.Handle("/api/", use(api))
-	// params.Router.Handle("GET /status", use(params.Status))
-	// params.Router.Handle("GET /health", use(health.NewProbe(nil)))
 }

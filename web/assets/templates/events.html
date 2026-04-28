@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hydra Mesh - Topology</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.2/sse.js"></script>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <link rel="stylesheet" href="/assets/css/output.css">
+
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="min-h-screen bg-[#111111] text-gray-200 font-sans">
+
+<div hx-ext="sse" sse-connect="/api/events" hx-swap="none">
+    <div sse-swap="node.joined"></div>
+    <div sse-swap="node.updated"></div>
+    <div sse-swap="node.left"></div>
+</div>
+
+<div class="container mx-auto max-w-6xl p-4 sm:p-8">
+    <header class="mb-8 flex flex-col md:flex-row justify-between items-center border-b-2 border-emerald-500/50 pb-4">
+        <div>
+            <h1 class="text-3xl font-bold tracking-wider text-emerald-400">Hydra Mesh</h1>
+            <p class="text-sm text-gray-400 mt-1">Real-time Control Plane</p>
+        </div>
+        <div class="mt-4 md:mt-0 flex items-center gap-3">
+            <span class="text-xs text-gray-500 font-mono">Client: {{ .ClientID }}</span>
+            <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold animate-pulse">
+                <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                LIVE
+            </div>
+        </div>
+    </header>
+
+    <div x-data>
+
+        <div class="flex space-x-4 mb-6">
+            <button @click="$store.cluster.activeTab = 'nodes'"
+                    :class="$store.cluster.activeTab === 'nodes' ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
+                    class="px-4 py-2 rounded-md font-semibold transition-colors flex items-center gap-2">
+                Active Nodes
+                <span class="bg-black/30 px-2 py-0.5 rounded-full text-xs" x-text="$store.cluster.nodesList.length"></span>
+            </button>
+        </div>
+
+        <div x-show="$store.cluster.activeTab === 'nodes'" x-transition class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+            <template x-for="node in $store.cluster.nodesList" :key="node.id">
+                <div class="bg-gray-800/50 border border-gray-700 rounded-xl p-5 relative overflow-hidden shadow-lg transition-all duration-300 hover:border-emerald-500/50">
+                    <div class="absolute top-0 left-0 w-1.5 h-full" :class="node.healthy ? 'bg-emerald-500' : 'bg-red-500'"></div>
+
+                    <div class="flex justify-between items-start mb-4 ml-2">
+                        <h3 class="font-mono text-lg font-bold text-gray-100" x-text="node.id"></h3>
+                        <span class="px-2 py-1 rounded text-xs font-bold tracking-wide uppercase"
+                              :class="node.healthy ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'"
+                              x-text="node.healthy ? 'Healthy' : 'Unhealthy'">
+                        </span>
+                    </div>
+
+                    <div class="space-y-3 text-sm text-gray-400 ml-2">
+                        <div class="flex justify-between border-b border-gray-700/50 pb-1">
+                            <span>Proxy IP</span>
+                            <span class="font-mono text-gray-200" x-text="$store.cluster.getPrimaryIP(node)"></span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-700/50 pb-1">
+                            <span>Last Seen</span>
+                            <span class="text-gray-300" x-text="$store.cluster.formatDate(node.last_seen)"></span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-700/50 pb-1">
+                            <span>Interfaces</span>
+                            <span class="text-gray-300" x-text="node.interfaces ? node.interfaces.length : 0"></span>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <div x-show="$store.cluster.nodesList.length === 0" x-cloak class="col-span-full text-center py-12 border-2 border-dashed border-gray-700 rounded-xl text-gray-500">
+                Waiting for nodes to join the cluster...
+            </div>
+        </div>
+
+    </div>
+
+    <footer class="text-center mt-12 text-xs text-gray-600">
+        <hr class="border-t border-gray-800 my-4">
+        <p>© 2026 Hydra Mesh Project.</p>
+    </footer>
+</div>
+
+<script>
+    document.addEventListener('alpine:init', () => {
+        // Alpine Store para manejar el estado del clúster de forma reactiva
+        Alpine.store('cluster', {
+            activeTab: 'nodes',
+            nodesMap: {}, // Diccionario (O(1) lookups/updates)
+
+            async init() {
+                // 1. Snapshot Inicial: Hacemos fetch a la API regular para llenar la pantalla
+                try {
+                    const response = await fetch('/api/nodes');
+                    if (response.ok) {
+                        const data = await response.json();
+                        const newMap = {};
+                        data.forEach(node => newMap[node.id] = node);
+                        this.nodesMap = newMap;
+                    }
+                } catch (err) {
+                    console.error("Failed to load initial nodes:", err);
+                }
+            },
+
+            // Convertimos el diccionario a un Array ordenado para el x-for
+            get nodesList() {
+                return Object.values(this.nodesMap).sort((a, b) => a.id.localeCompare(b.id));
+            },
+
+            upsertNode(node) {
+                // Desestructuración para forzar a Alpine a detectar el cambio de estado
+                this.nodesMap = { ...this.nodesMap, [node.id]: node };
+            },
+
+            removeNode(nodeId) {
+                const newMap = { ...this.nodesMap };
+                delete newMap[nodeId];
+                this.nodesMap = newMap;
+            },
+
+            // Helpers de formato
+            formatDate(timestamp) {
+                if (!timestamp) return 'Unknown';
+                const d = new Date(timestamp);
+                return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            },
+
+            getPrimaryIP(node) {
+                if (node.interfaces && node.interfaces.length > 0) {
+                    return `${node.interfaces[0].private_ip}:${node.interfaces[0].service_port}`;
+                }
+                return 'No IP bound';
+            }
+        });
+    });
+
+    // 2. Puente de Comunicación HTMX -> Alpine
+    // Escuchamos globalmente los eventos SSE que procesa HTMX
+    document.body.addEventListener('htmx:sseMessage', function (e) {
+        const eventType = e.detail.type;
+
+        // Ignorar eventos estándar o el ping de ":keepalive" que no tienen data válida
+        if (!eventType || eventType === 'message') return;
+
+        try {
+            const nodeData = JSON.parse(e.detail.data);
+            const store = Alpine.store('cluster');
+
+            // Mapeo exacto usando los nombres de eventos con punto
+            if (eventType === 'node.joined' || eventType === 'node.updated') {
+                store.upsertNode(nodeData);
+            } else if (eventType === 'node.left') {
+                store.removeNode(nodeData.id);
+            }
+        } catch (err) {
+            console.error("Error parsing SSE data:", err);
+        }
+    });
+</script>
+
+</body>
+</html>

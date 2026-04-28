@@ -29,6 +29,19 @@ func (b *memoryEventBus) Subscribe() <-chan ClusterEvent {
 	return ch
 }
 
+func (b *memoryEventBus) Unsubscribe(ch <-chan ClusterEvent) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for i, sub := range b.subscribers {
+		if sub == ch {
+			b.subscribers[i] = b.subscribers[len(b.subscribers)-1]
+			b.subscribers = b.subscribers[:len(b.subscribers)-1]
+			return
+		}
+	}
+}
+
 // Publish fans the event out to every active subscriber safely.
 func (b *memoryEventBus) Publish(event ClusterEvent) {
 	b.mu.RLock()

@@ -43,6 +43,7 @@ var Module = fx.Module("httpapi",
 	fx.Provide(NewHttpServerMux),
 	fx.Provide(presenters.NewPresenters),
 	fx.Provide(handlers.NewTopologyHandler),
+	fx.Provide(handlers.NewWebHandler),
 	fx.Invoke(MountAdminEndpoints),
 	fx.Invoke(NewHttpApi),
 )

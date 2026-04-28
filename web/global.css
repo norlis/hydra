@@ -1,0 +1,199 @@
+@import "tailwindcss";
+
+/* Load FiraCode Nerd Fonts */
+@font-face {
+    font-family: "FiraCode Nerd Font";
+    src: url("/assets/fonts/FiraCodeNerdFont-Medium.ttf") format("truetype");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "FiraCode Nerd Font Mono";
+    src: url("/assets/fonts/FiraCodeNerdFontMono-Medium.ttf") format("truetype");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "FiraCode Nerd Font Propo";
+    src: url("/assets/fonts/FiraCodeNerdFontPropo-Medium.ttf") format("truetype");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* Tailwind CSS v4 Theme Configuration */
+@theme inline {
+
+    --color-background: #18181b;
+    --color-foreground: #f8f8f2;
+    --color-card: #18181b;
+    --color-card-foreground: #f8f8f2;
+    --color-popover: #18181b;
+    --color-popover-foreground: #f8f8f2;
+    --color-primary: #ffb86c;
+    --color-primary-foreground: #18181b;
+    --color-secondary: #282a36;
+    --color-secondary-foreground: #ffb86c;
+    --color-muted: #282a36;
+    --color-muted-foreground: #ffb86c;
+    --color-accent: #ffb86c;
+    --color-accent-foreground: #18181b;
+    --color-destructive: #ff5555;
+    --color-destructive-foreground: #f8f8f2;
+    --color-border: #ffb86c;
+    --color-input: #282a36;
+    --color-ring: #ffb86c;
+    --color-radius: 0px;
+    --color-success: #4ade80;
+
+    /* Custom devlogs colors */
+    --color-devlogs-bg: #1a1a1a;
+    --color-devlogs-text: #d4b896;
+    --color-devlogs-amber: #f59e0b;
+    --color-devlogs-green: #4ade80;
+    --color-devlogs-muted: #9ca3af;
+    --color-devlogs-secondary: #262626;
+
+    /* Font families */
+    --font-sans: "FiraCode Nerd Font", "FiraCode Nerd Font Mono", "Fira Code", monospace;
+    --font-mono: "FiraCode Nerd Font Mono", "FiraCode Nerd Font", "Fira Code", monospace;
+    --font-propo: "FiraCode Nerd Font Propo", "FiraCode Nerd Font", "Fira Code", sans-serif;
+}
+
+.bg-\[\#232323\] {
+    --tw-bg-opacity: 1;
+    background-color: rgb(35 35 35 / var(--tw-bg-opacity, 1));
+}
+
+
+/* Base styles */
+body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-weight: 500;
+    font-feature-settings: "liga" 1, "calt" 1; /* Enable ligatures */
+}
+
+/* Ensure all code-like elements use the mono variant */
+code,
+pre,
+.font-mono,
+.devlogs-log-line {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-feature-settings: "liga" 1, "calt" 1;
+}
+
+/* Use proportional variant for regular text */
+.font-propo {
+    font-family: var(--font-propo);
+    font-weight: 500;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-devlogs-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-devlogs-amber) 30%, transparent);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--color-devlogs-amber) 50%, transparent);
+}
+
+/* Custom styles for devlogs theme */
+.devlogs-container {
+    background: var(--color-devlogs-bg);
+    border: 1px solid var(--color-devlogs-amber);
+    border-radius: 8px;
+}
+
+.devlogs-tag {
+    background: transparent;
+    border: 1px solid var(--color-devlogs-amber);
+    color: var(--color-devlogs-amber);
+}
+
+.devlogs-date {
+    color: var(--color-devlogs-green);
+}
+
+.devlogs-info {
+    color: var(--color-devlogs-green);
+    font-weight: 500;
+}
+
+.devlogs-muted {
+    color: var(--color-devlogs-muted);
+}
+
+.devlogs-title {
+    color: var(--color-devlogs-amber);
+}
+
+.devlogs-log-line {
+    font-family: var(--font-mono);
+    line-height: 1.6;
+    padding: 4px 0;
+    font-weight: 500;
+    font-feature-settings: "liga" 1, "calt" 1;
+}
+
+/* Nerd font icons */
+.nerd-icon {
+    font-family: var(--font-sans);
+    font-weight: 500;
+}
+
+/* Custom utility classes using Tailwind v4 approach */
+.bg-devlogs {
+    background-color: var(--color-devlogs-bg);
+}
+
+.text-devlogs {
+    color: var(--color-devlogs-text);
+}
+
+.text-devlogs-amber {
+    color: var(--color-devlogs-amber);
+}
+
+.text-devlogs-green {
+    color: var(--color-devlogs-green);
+}
+
+.text-devlogs-muted {
+    color: var(--color-devlogs-muted);
+}
+
+.border-devlogs-amber {
+    border-color: var(--color-devlogs-amber);
+}
+
+.bg-devlogs-secondary {
+    background-color: var(--color-devlogs-secondary);
+}
+
+/*nuevod*/
+
+.log-date { color: #8cc265; } /* Verde */
+.log-type { color: #6c99bb; } /* Azul */
+.log-key { color: #d8b863; } /* Amarillo/Naranja */
+.log-action-created { color: #8cc265; } /* Verde */
+.log-action-updated { color: #d8b863; } /* Amarillo/Naranja */
+.log-action-deleted { color: #d75f5f; } /* Rojo */
+.log-error { color: #d75f5f; font-weight: bold; } /* Rojo */
+.border-gold { border-color: #a18849; }
