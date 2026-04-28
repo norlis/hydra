@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hydra Mesh - Topology</title>
 
-    <!-- Tailwind via Play CDN: works without a build step.
-         When you regenerate /assets/css/output.css with your build, swap this back. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -20,23 +18,23 @@
             }
         }
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+          rel="stylesheet">
 
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.2/sse.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     <style>
-        [x-cloak] { display: none !important; }
+        [x-cloak] {
+            display: none !important;
+        }
 
         body {
             background-color: #0a0a0a;
-            background-image:
-                    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.08), transparent),
-                    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+            background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.08), transparent),
+            linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
             background-size: 100% 100%, 32px 32px, 32px 32px;
         }
 
@@ -44,6 +42,7 @@
             position: relative;
             background: linear-gradient(180deg, rgba(31, 41, 55, 0.4) 0%, rgba(17, 24, 39, 0.6) 100%);
         }
+
         .node-card::before {
             content: '';
             position: absolute;
@@ -56,18 +55,23 @@
             mask-composite: exclude;
             pointer-events: none;
         }
+
         .node-card.unhealthy::before {
             background: linear-gradient(180deg, rgba(239, 68, 68, 0.5), rgba(239, 68, 68, 0.05));
         }
-        .node-card.neutral::before {
-            background: linear-gradient(180deg, rgba(75, 85, 99, 0.5), rgba(75, 85, 99, 0.1));
-        }
 
         @keyframes live-pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            50%      { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            }
+            50% {
+                box-shadow: 0 0 0 4px rgba(16, 185, 129, 0);
+            }
         }
-        .live-dot { animation: live-pulse 2s infinite; }
+
+        .live-dot {
+            animation: live-pulse 2s infinite;
+        }
     </style>
 </head>
 <body class="min-h-screen text-gray-200 font-mono">
@@ -80,100 +84,102 @@
 
 <div class="container mx-auto max-w-7xl p-4 sm:p-6" x-data>
 
-    <!-- ============ HEADER ============ -->
     <header class="flex items-center justify-between gap-4 mb-6 px-5 py-3 rounded-xl bg-gray-900/40 border border-gray-800 backdrop-blur-sm">
         <div class="flex items-center gap-3">
             <h1 class="text-xl font-bold tracking-wide text-emerald-400">Hydra Mesh</h1>
             <div class="w-px h-6 bg-gray-700"></div>
             <div class="flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold tracking-wider">
                 <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 live-dot"></div>
-                LIVE
+                LIVE TOPOLOGY
             </div>
         </div>
-
-        <!-- Client ID badge -->
-        <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-900/60 border border-gray-800 text-xs">
-            <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2a4 4 0 014-4h4m-4-4V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h6m4-10h6a2 2 0 012 2v6a2 2 0 01-2 2h-6a2 2 0 01-2-2v-6a2 2 0 012-2z"/>
-            </svg>
-            <span class="text-gray-500">Client:</span>
-            <span class="text-gray-200">{{ .ClientID }}</span>
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-900/60 border border-gray-800 text-xs text-gray-400">
+            <span>Client:</span> <span class="text-gray-200 font-bold">{{ .ClientID }}</span>
         </div>
     </header>
 
-    <!-- ============ NODES PANEL (full width) ============ -->
     <section class="bg-gray-900/30 border border-gray-800 rounded-xl p-5 backdrop-blur-sm">
-
         <div class="flex items-center gap-1 mb-6 border-b border-gray-800">
             <button @click="$store.cluster.activeTab = 'nodes'"
-                    :class="$store.cluster.activeTab === 'nodes'
-                        ? 'text-emerald-400 border-emerald-400'
-                        : 'text-gray-500 border-transparent hover:text-gray-300'"
+                    :class="$store.cluster.activeTab === 'nodes' ? 'text-emerald-400 border-emerald-400' : 'text-gray-500 border-transparent hover:text-gray-300'"
                     class="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors flex items-center gap-2">
-                Nodes
-                <span class="bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded text-[10px]"
-                      x-text="$store.cluster.nodesList.length"></span>
+                Nodes <span class="bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded text-[10px]"
+                            x-text="$store.cluster.nodesList.length"></span>
             </button>
             <button @click="$store.cluster.activeTab = 'proxies'"
-                    :class="$store.cluster.activeTab === 'proxies'
-                        ? 'text-emerald-400 border-emerald-400'
-                        : 'text-gray-500 border-transparent hover:text-gray-300'"
-                    class="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors">
-                Proxies
+                    :class="$store.cluster.activeTab === 'proxies' ? 'text-emerald-400 border-emerald-400' : 'text-gray-500 border-transparent hover:text-gray-300'"
+                    class="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors flex items-center gap-2">
+                Proxies <span class="bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded text-[10px]"
+                              x-text="$store.cluster.proxiesList.length"></span>
             </button>
         </div>
 
         <div x-show="$store.cluster.activeTab === 'nodes'" x-transition
              class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-
             <template x-for="node in $store.cluster.nodesList" :key="node.id">
-                <div class="node-card relative rounded-xl p-4 transition-all duration-300 hover:-translate-y-0.5"
-                     :class="{ 'unhealthy': node.healthy === false, 'neutral': node.healthy === null || node.healthy === undefined }">
-
-                    <div class="flex items-center gap-2 mb-2 text-xs"
-                         x-show="node.healthy !== null && node.healthy !== undefined">
+                <div class="node-card relative rounded-xl p-4 transition-all duration-300"
+                     :class="{ 'unhealthy': !node.healthy }">
+                    <div class="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase">
                         <div class="w-1.5 h-1.5 rounded-full"
                              :class="node.healthy ? 'bg-emerald-400' : 'bg-red-400'"></div>
                         <span :class="node.healthy ? 'text-emerald-400' : 'text-red-400'"
                               x-text="node.healthy ? 'Healthy' : 'Unhealthy'"></span>
                     </div>
-
-                    <h3 class="text-lg font-bold text-gray-100 mb-3" x-text="node.id"></h3>
-
-                    <div class="space-y-1 text-xs text-gray-400 mb-3">
-                        <div>IP: <span class="text-gray-200" x-text="$store.cluster.getPrimaryIP(node)"></span></div>
-                        <div>Port: <span class="text-gray-200" x-text="$store.cluster.getPrimaryPort(node)"></span></div>
-                        <div>Uptime: <span class="text-gray-200" x-text="$store.cluster.formatUptime(node.last_seen)"></span></div>
+                    <h3 class="text-lg font-bold text-gray-100 mb-3 truncate" x-text="node.id"></h3>
+                    <div class="space-y-1 text-[11px] text-gray-400">
+                        <div>Private IP: <span class="text-gray-200" x-text="$store.cluster.getPrimaryIP(node)"></span>
+                        </div>
+                        <template x-if="$store.cluster.getPublicIP(node)">
+                            <div>Public IP: <span class="text-emerald-500 font-bold"
+                                                  x-text="$store.cluster.getPublicIP(node)"></span></div>
+                        </template>
+                        <div>Ports: <span class="text-gray-200" x-text="$store.cluster.getAllPorts(node)"></span></div>
+                        <div class="pt-2 text-gray-500 italic">Last Seen: <span
+                                x-text="$store.cluster.formatLastSeen(node.last_seen)"></span></div>
                     </div>
+                </div>
+            </template>
+        </div>
 
-                    <div class="flex flex-wrap gap-1.5" x-show="node.tags && Object.keys(node.tags).length > 0">
-                        <template x-for="(value, key) in (node.tags || {})" :key="key">
-                            <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase border"
-                                  :class="key === 'zone'
-                                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                                      : 'bg-sky-500/10 text-sky-300 border-sky-500/30'">
-                                <span x-text="key.toUpperCase() + ': ' + String(value).toUpperCase()"></span>
-                            </span>
+        <div x-show="$store.cluster.activeTab === 'proxies'" x-cloak x-transition
+             class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <template x-for="group in $store.cluster.groupedProxies" :key="group.nodeId">
+                <div class="bg-gray-800/30 border border-gray-700/50 rounded-xl p-5 shadow-lg">
+                    <h3 class="text-emerald-400 font-bold text-sm mb-4 flex items-center gap-2 border-b border-gray-800 pb-2">
+                        NODE: <span class="text-gray-200" x-text="group.nodeId"></span>
+                    </h3>
+                    <div class="space-y-3">
+                        <template x-for="proxy in group.proxies" :key="proxy.address">
+                            <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-3">
+                                <div class="flex justify-between items-center">
+                                    <span class="font-mono text-emerald-300 text-sm" x-text="proxy.address"></span>
+                                    <button @click="$store.cluster.testProxy(proxy.address)"
+                                            :disabled="$store.cluster.testStates[proxy.address]?.status === 'testing'"
+                                            class="px-3 py-1.5 rounded text-[10px] font-bold transition-all"
+                                            :class="$store.cluster.testStates[proxy.address]?.status === 'testing' ? 'bg-gray-700' : 'bg-emerald-600 hover:bg-emerald-500 text-white'">
+                                        <span x-text="$store.cluster.testStates[proxy.address]?.status === 'testing' ? 'Testing...' : 'Test Tunnel'"></span>
+                                    </button>
+                                </div>
+                                <div x-show="$store.cluster.testStates[proxy.address]" x-transition
+                                     class="mt-2 pt-2 border-t border-gray-800 text-[10px] font-mono">
+                                    <div x-show="$store.cluster.testStates[proxy.address]?.status === 'success'"
+                                         class="text-emerald-400">
+                                        ✓ Connected! IP via Proxy: <span class="bg-emerald-900/40 px-1 rounded"
+                                                                         x-text="$store.cluster.testStates[proxy.address]?.result"></span>
+                                    </div>
+                                    <div x-show="$store.cluster.testStates[proxy.address]?.status === 'error'"
+                                         class="text-red-400">
+                                        ✗ Failed: <span
+                                            x-text="$store.cluster.testStates[proxy.address]?.result"></span>
+                                    </div>
+                                </div>
+                            </div>
                         </template>
                     </div>
                 </div>
             </template>
-
-            <div x-show="$store.cluster.nodesList.length === 0" x-cloak
-                 class="col-span-full text-center py-16 border border-dashed border-gray-800 rounded-xl text-gray-600 text-sm">
-                Waiting for nodes to join the cluster...
-            </div>
-        </div>
-
-        <div x-show="$store.cluster.activeTab === 'proxies'" x-cloak x-transition
-             class="text-center py-16 text-gray-600 text-sm">
-            Proxies view — coming soon.
         </div>
     </section>
-
-    <footer class="text-center mt-10 text-[10px] text-gray-700">
-        © 2026 Hydra Mesh Project.
-    </footer>
 </div>
 
 <script>
@@ -181,82 +187,92 @@
         Alpine.store('cluster', {
             activeTab: 'nodes',
             nodesMap: {},
-            now: Date.now(),
+            proxiesList: [],
+            testStates: {},
 
             async init() {
+                await this.refreshAll();
+            },
+
+            async refreshAll() {
                 try {
-                    const response = await fetch('/api/nodes');
-                    if (response.ok) {
-                        const data = await response.json();
+                    const [nRes, pRes] = await Promise.all([fetch('/api/nodes'), fetch('/api/proxies')]);
+                    if (nRes.ok) {
+                        const nodes = await nRes.json();
                         const newMap = {};
-                        data.forEach(node => newMap[node.id] = node);
+                        nodes.forEach(n => newMap[n.id] = n);
                         this.nodesMap = newMap;
                     }
-                } catch (err) {
-                    console.error("Failed to load initial nodes:", err);
+                    if (pRes.ok) this.proxiesList = await pRes.json();
+                } catch (e) {
+                    console.error("Initial load failed", e);
                 }
-                setInterval(() => { this.now = Date.now(); }, 1000);
             },
 
             get nodesList() {
                 return Object.values(this.nodesMap).sort((a, b) => a.id.localeCompare(b.id));
             },
 
-            upsertNode(node) {
-                this.nodesMap = { ...this.nodesMap, [node.id]: node };
+            get groupedProxies() {
+                const groups = {};
+                this.proxiesList.forEach(p => {
+                    if (!groups[p.node_id]) groups[p.node_id] = [];
+                    groups[p.node_id].push(p);
+                });
+                return Object.keys(groups).sort().map(id => ({nodeId: id, proxies: groups[id]}));
             },
 
-            removeNode(nodeId) {
-                const newMap = { ...this.nodesMap };
-                delete newMap[nodeId];
-                this.nodesMap = newMap;
-            },
-
-            formatUptime(timestamp) {
-                if (!timestamp) return '—';
-                const secs = Math.floor((this.now - new Date(timestamp).getTime()) / 1000);
-                if (secs < 0)  return '0s';
-                if (secs < 60) return `${secs}s`;
-                const m = Math.floor(secs / 60), s = secs % 60;
-                if (m < 60)    return `${m}m ${String(s).padStart(2, '0')}s`;
-                const h = Math.floor(m / 60), mm = m % 60;
-                return `${h}h ${String(mm).padStart(2, '0')}m`;
-            },
-
-            getPrimaryIP(node) {
-                if (node.interfaces && node.interfaces.length > 0) {
-                    return node.interfaces[0].private_ip || 'N/A';
+            async testProxy(address) {
+                this.testStates = {...this.testStates, [address]: {status: 'testing', result: ''}};
+                try {
+                    const res = await fetch(`/api/proxies/test?address=${encodeURIComponent(address)}`);
+                    const data = await res.json();
+                    this.testStates = {
+                        ...this.testStates, [address]: {
+                            status: data.success ? 'success' : 'error',
+                            result: data.success ? data.ip : data.error
+                        }
+                    };
+                } catch (e) {
+                    this.testStates = {...this.testStates, [address]: {status: 'error', result: e.message}};
                 }
-                return 'No IP bound';
             },
 
-            getPrimaryPort(node) {
-                if (node.interfaces && node.interfaces.length > 0) {
-                    return node.interfaces[0].service_port || '—';
-                }
-                return '—';
+            formatLastSeen(ts) {
+                if (!ts) return '—';
+                return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+            },
+
+            getPrimaryIP(n) {
+                return (n.interfaces && n.interfaces[0]) ? n.interfaces[0].private_ip : 'N/A';
+            },
+
+            getPublicIP(n) {
+                return (n.interfaces && n.interfaces[0]?.public_ip) ? n.interfaces[0].public_ip : null;
+            },
+
+            getAllPorts(n) {
+                if (!n.interfaces) return '—';
+                const ports = n.interfaces.map(i => i.service_port).filter(p => p > 0);
+                return ports.length > 0 ? ports.join(', ') : '—';
             }
         });
     });
 
     document.body.addEventListener('htmx:sseMessage', function (e) {
-        const eventType = e.detail.type;
-        if (!eventType || eventType === 'message') return;
-
-        try {
+        const type = e.detail.type;
+        if (!type || type === 'message') return;
+        const store = Alpine.store('cluster');
+        if (type === 'node.left') {
             const nodeData = JSON.parse(e.detail.data);
-            const store = Alpine.store('cluster');
-
-            if (eventType === 'node.joined' || eventType === 'node.updated') {
-                store.upsertNode(nodeData);
-            } else if (eventType === 'node.left') {
-                store.removeNode(nodeData.id);
-            }
-        } catch (err) {
-            console.error("Error parsing SSE data:", err);
+            const newMap = {...store.nodesMap};
+            delete newMap[nodeData.id];
+            store.nodesMap = newMap;
+        } else {
+            store.nodesMap = {...store.nodesMap, [JSON.parse(e.detail.data).id]: JSON.parse(e.detail.data)};
         }
+        fetch('/api/proxies').then(r => r.json()).then(data => store.proxiesList = data);
     });
 </script>
-
 </body>
 </html>

@@ -3,7 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
@@ -75,15 +78,82 @@ func (h *TopologyHandler) Proxies(w http.ResponseWriter, r *http.Request) {
 
 	proxies := make([]ProxyInfo, 0, len(nodes))
 	for _, n := range nodes {
-		if len(n.Interfaces) > 0 {
+		for _, e := range n.Interfaces {
 			proxies = append(proxies, ProxyInfo{
 				NodeID:  n.ID,
-				Address: n.Interfaces[0].Address(),
+				Address: e.Address(),
 			})
 		}
 	}
 
 	h.render.JSON(w, r, proxies)
+}
+
+// TestProxy
+// @Summary Test a proxy
+// @Description Checks if a proxy address is operational by routing a request through it.
+// @Description The target defaults to https://checkip.amazonaws.com (returns the egress IP).
+// @Description Note: requires outbound internet access; will fail in air-gapped networks.
+// @Tags topology
+// @Produce json
+// @Param address query string true  "Proxy address (host:port, e.g. 192.168.1.10:3128)"
+// @Param target  query string false "Target URL to fetch through the proxy (default: https://checkip.amazonaws.com/)"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/proxies/test [get]
+func (h *TopologyHandler) TestProxy(w http.ResponseWriter, r *http.Request) {
+	proxyAddr := r.URL.Query().Get("address")
+	if proxyAddr == "" {
+		http.Error(w, "missing address parameter", http.StatusBadRequest)
+		return
+	}
+
+	if strings.ContainsAny(proxyAddr, "@/?#") {
+		http.Error(w, "invalid proxy address", http.StatusBadRequest)
+		return
+	}
+
+	proxyURL, err := url.Parse("http://" + proxyAddr)
+	if err != nil {
+		http.Error(w, "invalid proxy address", http.StatusBadRequest)
+		return
+	}
+
+	target := r.URL.Query().Get("target")
+	if target == "" {
+		target = "https://checkip.amazonaws.com/"
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		Timeout:   5 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		http.Error(w, "failed to build request", http.StatusInternalServerError)
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		h.logger.Warn("proxy test failed", zap.String("proxy", proxyAddr), zap.Error(err))
+		h.render.JSON(w, r, map[string]interface{}{
+			"proxy":   proxyAddr,
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
+
+	h.render.JSON(w, r, map[string]interface{}{
+		"proxy":   proxyAddr,
+		"success": resp.StatusCode == http.StatusOK,
+		"ip":      strings.TrimSpace(string(body)),
+		"status":  resp.StatusCode,
+	})
 }
 
 // Events

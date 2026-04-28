@@ -52,6 +52,7 @@ func NewHttpApi(params Params) {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/nodes", params.TopologyHandler.Nodes)
 	api.HandleFunc("GET /api/proxies", params.TopologyHandler.Proxies)
+	api.HandleFunc("GET /api/proxies/test", params.TopologyHandler.TestProxy)
 
 	params.Router.Handle("/api/", use(api))
 
