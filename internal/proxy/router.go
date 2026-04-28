@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/norlis/hydra/internal/cluster"
+	"github.com/norlis/hydra/internal/proxy/metrics"
 	"github.com/norlis/hydra/internal/topology"
 	"go.uber.org/zap"
 )
@@ -13,6 +15,14 @@ import (
 // identifier (tenant id, user id, URL path, etc.).
 const EntityHeader = "X-Entity-ID"
 
+// Routing decisions. Kept as a closed enum so they survive as a low-
+// cardinality Prometheus label.
+const (
+	decisionLocal    = "local"
+	decisionPeer     = "peer"
+	decisionHopLocal = "hop-local"
+)
+
 // Router implements MeshRouter. One instance per bound interface. It
 // decides whether the request belongs here (local processing) or to
 // another peer (peer forwarding) and delegates the actual bytes to
@@ -21,6 +31,7 @@ type Router struct {
 	iface     topology.NetworkInterface
 	ring      *cluster.Ring
 	forwarder Forwarder
+	metrics   *metrics.Metrics
 	log       *zap.Logger
 }
 
@@ -28,24 +39,71 @@ func NewRouter(
 	iface topology.NetworkInterface,
 	ring *cluster.Ring,
 	forwarder Forwarder,
+	mtr *metrics.Metrics,
 	log *zap.Logger,
 ) *Router {
 	return &Router{
 		iface:     iface,
 		ring:      ring,
 		forwarder: forwarder,
+		metrics:   mtr,
 		log:       log.With(zap.String("iface", iface.Name)),
 	}
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	peer := r.peerFor(req)
-	r.logDecision(req, peer)
+	decision := r.decisionFor(req, peer)
+	r.logDecision(req, peer, decision)
+
+	// CONNECT is hijacked by the forwarder; instrumentation lives in
+	// tunnelExternal/tunnelViaPeer (connect_attempts_total + canonical
+	// tunnel_done log). Wrapping ResponseWriter here would also mask
+	// the http.Hijacker interface that the hijack path needs.
+	if req.Method == http.MethodConnect {
+		r.dispatch(w, req, peer)
+		return
+	}
+
+	start := time.Now()
+	rec := newStatusRecorder(w)
+	r.dispatch(rec, req, peer)
+
+	r.metrics.RecordRequest(req.Context(), req.Method, metrics.StatusClass(rec.status), decision)
+	// Canonical decision log per finished HTTP request. Mirror of
+	// tunnel_done in forwarder.go: one structured line containing every
+	// field needed for post-mortem and audit.
+	r.log.Info("http_done",
+		zap.String("event", "http"),
+		zap.String("method", req.Method),
+		zap.String("host", req.Host),
+		zap.String("entity_id", req.Header.Get(EntityHeader)),
+		zap.String("decision", decision),
+		zap.String("peer", peer),
+		zap.Int("status", rec.status),
+		zap.Duration("duration", time.Since(start)),
+	)
+}
+
+func (r *Router) dispatch(w http.ResponseWriter, req *http.Request, peer string) {
 	if peer != "" {
 		r.forwarder.ForwardToPeer(peer, w, req)
 		return
 	}
 	r.forwarder.ForwardToExternal(w, req)
+}
+
+// decisionFor returns the canonical routing-decision string for this
+// request. Kept separate so logDecision and metric labels never drift.
+func (r *Router) decisionFor(req *http.Request, peer string) string {
+	switch {
+	case req.Header.Get(HopHeader) != "":
+		return decisionHopLocal
+	case peer != "":
+		return decisionPeer
+	default:
+		return decisionLocal
+	}
 }
 
 // logDecision emits one line per incoming request with the routing
@@ -55,14 +113,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 //	peer       -> relayed to another node (peer address in "peer" field)
 //	hop-local  -> already forwarded once (HopHeader set), kept local to
 //	              avoid ping-pong loops during ring convergence
-func (r *Router) logDecision(req *http.Request, peer string) {
-	decision := "local"
-	switch {
-	case req.Header.Get(HopHeader) != "":
-		decision = "hop-local"
-	case peer != "":
-		decision = "peer"
-	}
+func (r *Router) logDecision(req *http.Request, peer, decision string) {
 	r.log.Info("proxy request",
 		zap.String("method", req.Method),
 		zap.String("host", req.Host),
@@ -92,4 +143,47 @@ func (r *Router) peerFor(req *http.Request) string {
 		return ""
 	}
 	return ep.ProxyAddr
+}
+
+// statusRecorder is a minimal ResponseWriter wrapper that captures the
+// final status code so the router can emit it on the canonical log
+// line and as a Prometheus label. Used only on the non-CONNECT path —
+// CONNECT hijacks the conn and never writes a status through the
+// ResponseWriter at all.
+type statusRecorder struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func newStatusRecorder(w http.ResponseWriter) *statusRecorder {
+	// Default to 200 because http.ResponseWriter.Write implicitly
+	// writes a 200 header when WriteHeader was never called. Without
+	// this default, a successful Write-only response would log status=0.
+	return &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	if !s.wroteHeader {
+		s.status = code
+		s.wroteHeader = true
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	if !s.wroteHeader {
+		s.wroteHeader = true
+	}
+	return s.ResponseWriter.Write(b)
+}
+
+// Flush proxies http.Flusher when the underlying writer supports it.
+// httputil.ReverseProxy expects Flush to work for streaming responses,
+// so a wrapper that swallows it would cause buffered upstreams to
+// stall the client.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

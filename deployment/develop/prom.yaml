@@ -1,0 +1,11 @@
+# Prometheus — develop profile.
+# Scrapes the OTel Collector's prometheus exporter every 5s. The
+# `otelcol` hostname is resolved by docker compose's default network.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: hydra
+    static_configs:
+      - targets: ['otelcol:9464']

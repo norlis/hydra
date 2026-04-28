@@ -137,6 +137,115 @@ on the instance; IMDSv1-only instances will fail to start.
 
 ---
 
+## Runtime tuning
+
+These knobs shape how the Go runtime and the kernel behave under load.
+None of them are strictly required to run Hydra, but they are the
+difference between a node that survives a traffic spike and a node
+that gets OOM-killed or thrashes.
+
+### `GOMAXPROCS` — leave it alone
+
+Hydra targets **Go 1.26**, where the runtime reads the cgroup CPU quota
+on Linux containers and sets `GOMAXPROCS` automatically. Vendoring
+`go.uber.org/automaxprocs` is therefore intentionally **not** done — it
+would only matter on Go ≤ 1.24.
+
+If you are running outside a container and want to override (e.g. pin
+to physical cores on a bare-metal host), set the environment variable
+explicitly:
+
+```sh
+GOMAXPROCS=8 hydra
+```
+
+### `GOMEMLIMIT` — set it on every container
+
+Set `GOMEMLIMIT` to roughly **90% of the container memory limit**. This
+gives the GC a soft budget to pace against, which dramatically reduces
+the chance of an OOM kill under bursty allocation. Example for a 4 GiB
+container:
+
+```sh
+GOMEMLIMIT=3600MiB hydra
+```
+
+The 10% headroom covers off-heap allocations (cgo, mmap, kernel TCP
+buffers — Hydra holds two TCP sockets per active CONNECT tunnel). Tune
+down further if `pprof` shows large RSS coming from network buffers
+under your peak load.
+
+`GOGC` can stay at its default (`100`); only lower it (`50`–`75`) if a
+GC profile shows runaway heap growth between collections.
+
+### Sysctls (Linux hosts running Hydra)
+
+The proxy is a long-lived TCP server with high connection turnover.
+Crank these once on the host (or via a `DaemonSet`/userdata) to avoid
+hitting kernel-side limits before Go-side ones:
+
+```sh
+# More queued SYNs than the 128 default.
+sysctl -w net.core.somaxconn=4096
+sysctl -w net.ipv4.tcp_max_syn_backlog=4096
+
+# Don't cap us at the per-process default fd ceiling.
+ulimit -n 1048576
+
+# Conntrack table — only needed if the host runs iptables/nf_conntrack
+# in front of Hydra (most do). Default 65k fills up fast under DDoS or
+# scrape storms.
+sysctl -w net.netfilter.nf_conntrack_max=1048576
+```
+
+### TCP keepalive
+
+The proxy data-plane sets keepalive on every accepted conn via
+`net.ListenConfig.KeepAliveConfig` (Go 1.23+): probe after 30s idle,
+then every 10s, drop after 3 misses (~60s to detect a dead client).
+This is in code and does not need any env var.
+
+### `MaxHeaderBytes`
+
+Capped at 16 KiB on both the proxy data-plane and the control-plane
+HTTP servers. Hardcoded — there is no env knob, and there is no good
+reason to raise it.
+
+---
+
+## Observability
+
+Hydra emits **OpenTelemetry** metrics over **OTLP/HTTP** to a
+collector you run alongside the fleet (e.g. the OpenTelemetry
+Collector). Re-exposing as Prometheus, Datadog, Cloud Watch, etc. is a
+collector pipeline concern and lives outside the binary — the node
+itself does not serve `/metrics`.
+
+Configure the exporter through the standard OTel environment
+variables (no Hydra-specific knobs):
+
+| Variable | Default | Description |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | Base URL of the OTLP/HTTP receiver. |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | — | Override for the metrics signal only. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | — | Comma-separated `k=v` pairs; use for auth tokens. |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `60000` (ms) | Push cadence. |
+| `OTEL_RESOURCE_ATTRIBUTES` | — | Extra resource labels (`env=prod,region=us-east-1`). |
+| `OTEL_SDK_DISABLED` | `false` | `true` turns the SDK into a no-op (useful for tests). |
+
+`service.name=hydra`, `service.version=<git hash>`, and
+`service.instance.id=<HYDRA_NODE_NAME>` are injected automatically;
+the resource detector also adds host/process attributes.
+
+Bundled metric names (all dotted, prefixed `hydra.proxy.*`):
+`active_tunnels`, `connect_attempts{result}`, `connect_denied{reason}`,
+`connect_errors{stage}`, `bytes{direction}`, `requests{method,status_class,decision}`,
+`connect_setup_seconds`, `tunnel_seconds`. Go runtime metrics (heap,
+GC, goroutines) are emitted by the OTel runtime instrumentation under
+the standard `process.runtime.go.*` namespace.
+
+---
+
 ## HTTP endpoints
 
 The control-plane listens on `CONTROL_PORT` (default `9090`):
@@ -144,6 +253,8 @@ The control-plane listens on `CONTROL_PORT` (default `9090`):
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/nodes` | Returns the local node + every peer known to memberlist. Each node carries its full `topology.Node` (interfaces, MAC, ports, last-seen, health) decoded from the peer's gossiped `NodeMeta`. |
+| `GET` | `/healthz` | Liveness probe. Returns `200 ok` while the process is running. |
+| `*` | `/debug/pprof/*` | Standard `net/http/pprof` handlers (`profile`, `heap`, `goroutine`, `trace`, …). Bind the control port to a private interface or fence with a security group — pprof exposes process internals. |
 
 The forward proxy data-plane listens on `BASE_PORT` (+1 per extra NIC). It
 accepts standard HTTP forward-proxy and CONNECT requests, honoring these

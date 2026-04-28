@@ -1,0 +1,23 @@
+# Local develop stack: OTel Collector + Prometheus + Grafana.
+# Run Hydra on the host pointing at OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318.
+services:
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes: ["./deployment/develop/otelcol.yaml:/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "4318:4318" # OTLP/HTTP receiver (Hydra → here)
+      - "9464:9464" # Prometheus exposition (also useful for `curl :9464/metrics`)
+
+  prometheus:
+    image: prom/prometheus
+    volumes: ["./deployment/develop/prom.yaml:/etc/prometheus/prometheus.yml"]
+    ports: ["9090:9090"]
+    depends_on: [otelcol]
+
+  grafana:
+    image: grafana/grafana
+    ports: ["3000:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    depends_on: [prometheus]

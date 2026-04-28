@@ -129,10 +129,18 @@ func (m *MemberlistDiscovery) Stop() error {
 	return m.list.Shutdown()
 }
 
-// autoJoinLoop periodically re-resolves seeds and calls Join. Join is
-// idempotent, so re-running it against already-known peers is cheap and
-// catches the cases where nodes start out of order or a split-brain
-// needs to be healed.
+// autoJoinLoop periodically re-resolves seeds and calls Join, but only
+// while this node is alone (NumMembers <= 1). Once at least one peer
+// has been discovered, gossip itself maintains membership; running Join
+// again would just be wasted mDNS queries / Cloud Map API calls.
+//
+// The loop wakes back up automatically if the membership ever drops to
+// 1 (last peer left) and resumes seed discovery until a peer is found.
+//
+// Trade-off: a split-brain where two healthy clusters never see each
+// other (both sides have NumMembers > 1 but pointed at disjoint peers)
+// won't auto-heal. Mitigate with static HYDRA_GOSSIP_SEEDS shared by
+// every node, or upgrade to an adaptive-backoff variant if needed.
 func (m *MemberlistDiscovery) autoJoinLoop() {
 	interval := m.cfg.GossipRejoinInterval
 	if interval <= 0 {
@@ -146,6 +154,10 @@ func (m *MemberlistDiscovery) autoJoinLoop() {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
+			if m.list.NumMembers() > 1 {
+				// Already part of a cluster; let gossip handle it.
+				continue
+			}
 			seeds := m.resolveSeeds()
 			if len(seeds) == 0 {
 				continue

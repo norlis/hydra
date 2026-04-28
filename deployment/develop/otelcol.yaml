@@ -1,0 +1,30 @@
+# OpenTelemetry Collector — develop profile.
+# Receives OTLP/HTTP from Hydra on 4318 and re-exposes the metrics on
+# 9464 in Prometheus exposition format so the local Prometheus can
+# scrape them.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+
+exporters:
+  # Re-exposes received metrics at /metrics on :9464 for Prometheus.
+  # resource_to_telemetry_conversion lifts resource attributes
+  # (service.name, service.instance.id, …) into per-series labels so
+  # you can group/filter by them in Grafana.
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]

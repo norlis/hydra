@@ -14,7 +14,7 @@ type Config struct {
 	Environment string `env:"ENVIRONMENT"  envDefault:"development"` // production | development | local
 	Provider    string `env:"PROVIDER"     envDefault:"aws"`         // aws | local
 	BasePort    int    `env:"BASE_PORT"    envDefault:"3128"`
-	ControlPort string `env:"CONTROL_PORT" envDefault:"9090"`
+	ControlPort string `env:"CONTROL_PORT" envDefault:"9192"`
 	LogLevel    string `env:"LOG_LEVEL"    envDefault:"info"` // debug | info | warn | error
 
 	// Gossip plane (memberlist).
@@ -22,7 +22,7 @@ type Config struct {
 	GossIPBindAddr       string        `env:"HYDRA_GOSSIP_ADDR"            envDefault:"0.0.0.0"`
 	GossIPBindPort       int           `env:"HYDRA_GOSSIP_PORT"            envDefault:"7946"`
 	GossIPSeeds          []string      `env:"HYDRA_GOSSIP_SEEDS"           envSeparator:","`
-	GossipRejoinInterval time.Duration `env:"HYDRA_GOSSIP_REJOIN_INTERVAL" envDefault:"15s"`
+	GossipRejoinInterval time.Duration `env:"HYDRA_GOSSIP_REJOIN_INTERVAL" envDefault:"5s"`
 	// Hex-encoded AES key (16, 24 or 32 bytes after decoding → AES-128/192/256).
 	// Empty disables gossip encryption; peers without the same key cannot
 	// join. Generate with: openssl rand -hex 16
@@ -34,8 +34,46 @@ type Config struct {
 
 	// Extra request headers to remove before forwarding to the upstream
 	// (internet) service. Control-plane headers (X-Hydra-Hop, X-Entity-ID)
-	// are always stripped regardless of this list.
+	// and RFC 7230 hop-by-hop headers are always stripped regardless.
 	ProxyStripHeaders []string `env:"HYDRA_STRIP_HEADERS" envSeparator:","`
+
+	// Allowed destination ports for CONNECT. Any other port is rejected
+	// with 403 before dialing. Default 443,80 — opening more is a
+	// conscious choice (SMTP/SSH/RDP turn the proxy into a relay).
+	ProxyAllowedPorts []int `env:"HYDRA_PROXY_ALLOWED_PORTS" envSeparator:"," envDefault:"443,80"`
+
+	// Extra CIDR ranges to deny in addition to the built-in list
+	// (RFC1918, loopback, link-local, IETF reserved, IPv6 embeddings).
+	// Comma-separated. Example: "203.0.113.0/24,2001:db8::/32".
+	ProxyDenyCIDR []string `env:"HYDRA_PROXY_DENY_CIDR" envSeparator:","`
+
+	// Per-deployment allow CIDRs that override the built-in deny list.
+	// Use to permit a specific private range (e.g. partner VPC accessible
+	// via VPC peering). Empty by default.
+	ProxyAllowCIDR []string `env:"HYDRA_PROXY_ALLOW_CIDR" envSeparator:","`
+
+	// Maximum concurrent CONNECT tunnels per node. Zero (default) means
+	// unlimited; turn it on once you have a credible upper bound from
+	// production load. Going over the cap returns 503 before the dial.
+	ProxyMaxTunnels int `env:"HYDRA_PROXY_MAX_TUNNELS" envDefault:"0"`
+
+	// Per-tunnel idle timeout. After this much time without bytes flowing
+	// in either direction the tunnel is force-closed. Zero (default)
+	// disables the watchdog. Pick a value larger than the longest legit
+	// idle period (e.g. WebSocket keepalives).
+	ProxyIdleTimeout time.Duration `env:"HYDRA_PROXY_IDLE_TIMEOUT" envDefault:"0s"`
+
+	// Auth mode applied to inbound proxy requests:
+	//
+	//	none  -> no auth check (default; safe only on a trusted LAN)
+	//	basic -> RFC 7617 Proxy-Authorization with HYDRA_PROXY_AUTH_USER/PASS
+	//
+	// Peer hops (X-Hydra-Hop set) are always exempt — peers are trusted
+	// because the inter-node link is expected to live on a private
+	// interface.
+	ProxyAuthMode string `env:"HYDRA_PROXY_AUTH_MODE" envDefault:"none"`
+	ProxyAuthUser string `env:"HYDRA_PROXY_AUTH_USER"`
+	ProxyAuthPass string `env:"HYDRA_PROXY_AUTH_PASS"`
 
 	// AWS Cloud Map — only used when Environment == "aws".
 	CloudMapRegion    string `env:"HYDRA_CLOUDMAP_REGION"    envDefault:"us-east-1"`
@@ -61,6 +99,18 @@ func NewConfigFromEnv(logger *zap.Logger) (*Config, error) {
 	}
 	if key == nil {
 		logger.Warn("gossip encryption disabled (HYDRA_GOSSIP_SECRET not set)")
+	}
+	// Validate ProxyAuthMode now so a typo doesn't silently degrade to
+	// "none" at first request.
+	switch cfg.ProxyAuthMode {
+	case "", "none":
+		cfg.ProxyAuthMode = "none"
+	case "basic":
+		if cfg.ProxyAuthUser == "" || cfg.ProxyAuthPass == "" {
+			return nil, fmt.Errorf("HYDRA_PROXY_AUTH_MODE=basic requires HYDRA_PROXY_AUTH_USER and HYDRA_PROXY_AUTH_PASS")
+		}
+	default:
+		return nil, fmt.Errorf("HYDRA_PROXY_AUTH_MODE must be one of: none, basic (got %q)", cfg.ProxyAuthMode)
 	}
 	return cfg, nil
 }

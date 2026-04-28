@@ -1,7 +1,7 @@
 # memberlist-basic — endpoints del API HTTP
 # Arranca un nodo con: ./memberlist-basic --provider=local --http-addr=:8080
 
-@host = http://127.0.0.1:9090
+@host = http://127.0.0.1:9192
 
 ### Snapshot JSON de miembros activos del clúster
 GET {{host}}/api/nodes
