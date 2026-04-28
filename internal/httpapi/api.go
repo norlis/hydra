@@ -5,6 +5,9 @@ import (
 
 	"github.com/norlis/httpgate/pkg/adapter/apidriven/middleware"
 	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
+	"github.com/norlis/httpgate/pkg/application/health"
+	"github.com/norlis/httpgate/pkg/port"
+	"github.com/norlis/hydra/internal/cluster"
 	"github.com/norlis/hydra/internal/httpapi/handlers"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -12,10 +15,11 @@ import (
 
 type Params struct {
 	fx.In
-	Router          *http.ServeMux
-	Logger          *zap.Logger
-	Render          presenters.Presenters
-	TopologyHandler *handlers.TopologyHandler
+	Router               *http.ServeMux
+	Logger               *zap.Logger
+	Render               presenters.Presenters
+	TopologyHandler      *handlers.TopologyHandler
+	NodeReadinessChecker *cluster.NodeReadinessChecker
 }
 
 // NewHttpApi
@@ -46,7 +50,11 @@ func NewHttpApi(params Params) {
 
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/nodes", params.TopologyHandler.Nodes)
+	api.HandleFunc("GET /api/proxies", params.TopologyHandler.Proxies)
 
+	params.Router.Handle("GET /health", use(health.NewProbe(map[string]port.Checker{
+		"node": params.NodeReadinessChecker,
+	})))
 	params.Router.Handle("/api/", use(api))
 	// params.Router.Handle("GET /status", use(params.Status))
 	// params.Router.Handle("GET /health", use(health.NewProbe(nil)))

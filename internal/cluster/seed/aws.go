@@ -102,8 +102,8 @@ func (c *CloudMap) Shutdown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, cloudMapAPITimeout)
 	defer cancel()
 	_, err := c.client.DeregisterInstance(ctx, &sd.DeregisterInstanceInput{
-		InstanceId: awssdk.String(c.cfg.InstanceID),
-		ServiceId:  awssdk.String(serviceID),
+		InstanceId: new(c.cfg.InstanceID),
+		ServiceId:  new(serviceID),
 	})
 	return err
 }

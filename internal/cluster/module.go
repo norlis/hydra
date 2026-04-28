@@ -15,6 +15,7 @@ var Module = fx.Module("cluster",
 	fx.Provide(NewMemberlistDiscovery),
 	fx.Provide(func(m *MemberlistDiscovery) Discovery { return m }),
 	fx.Provide(NewRing),
+	fx.Provide(NewNodeReadinessChecker),
 	fx.Invoke(registerLifecycle),
 )
 

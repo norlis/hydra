@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
@@ -67,6 +69,11 @@ var Module = fx.Module("httpapi",
 // lifecycle hook.
 func NewMeterProvider(lc fx.Lifecycle, cfg *hydra.Config, log *zap.Logger) (metric.MeterProvider, error) {
 	ctx := context.Background()
+
+	if strings.ToLower(os.Getenv("OTEL_SDK_DISABLED")) == "true" {
+		log.Info("OpenTelemetry SDK disabled via OTEL_SDK_DISABLED=true")
+		return otel.GetMeterProvider(), nil
+	}
 
 	exporter, err := otlpmetrichttp.New(ctx)
 	if err != nil {
@@ -143,11 +150,6 @@ func NewMeterProvider(lc fx.Lifecycle, cfg *hydra.Config, log *zap.Logger) (metr
 // control-plane mux. Metrics exposition is push-only (OTLP) and lives
 // outside this binary; nothing serves /metrics here.
 func MountAdminEndpoints(mux *http.ServeMux) {
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-
 	// pprof endpoints. Net/http/pprof registers on http.DefaultServeMux
 	// when imported as a side-effect; we wire each handler explicitly
 	// to keep the registration scoped to our mux.

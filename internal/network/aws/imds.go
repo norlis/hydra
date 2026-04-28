@@ -58,7 +58,7 @@ func (p *IMDSProvider) Discover() ([]topology.NetworkInterface, error) {
 	}
 
 	entries := make([]entry, 0)
-	for line := range strings.SplitSeq(macsRaw, "\n") {
+	for line := range strings.Lines(macsRaw) {
 		mac := strings.TrimSuffix(strings.TrimSpace(line), "/")
 		if mac == "" {
 			continue
