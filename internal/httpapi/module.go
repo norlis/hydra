@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
+	"github.com/norlis/httpgate/pkg/application/health"
 	hydra "github.com/norlis/hydra/internal"
 	"github.com/norlis/hydra/internal/httpapi/handlers"
 	"github.com/norlis/hydra/internal/version"
@@ -44,6 +45,13 @@ var Module = fx.Module("httpapi",
 	fx.Provide(presenters.NewPresenters),
 	fx.Provide(handlers.NewTopologyHandler),
 	fx.Provide(handlers.NewWebHandler),
+	fx.Provide(func() *health.Status {
+		version := version.GitHash
+		if version == "" {
+			version = "unknown.dev"
+		}
+		return health.NewStatus(version)
+	}),
 	fx.Invoke(MountAdminEndpoints),
 	fx.Invoke(NewHttpApi),
 )

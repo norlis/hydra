@@ -190,6 +190,10 @@ func (h *TopologyHandler) Events(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Debug("client subscribed to SSE events", zap.String("remote_addr", r.RemoteAddr))
 
+	// Tell the browser to wait 5 s before reconnecting instead of the default ~3 s.
+	_, _ = fmt.Fprint(w, "retry: 5000\n\n")
+	_ = rc.Flush()
+
 	// Keep-Alive ping to prevent timeouts in AWS ALB or intermediary proxies
 	keepAliveTicker := time.NewTicker(15 * time.Second)
 	defer keepAliveTicker.Stop()
@@ -206,38 +210,41 @@ func (h *TopologyHandler) Events(w http.ResponseWriter, r *http.Request) {
 
 		case ev, ok := <-ch:
 			if !ok {
-				// Event bus was closed by the server
+				// Event bus channel was closed by Unsubscribe (e.g. graceful shutdown)
 				h.logger.Warn("event bus channel closed, terminating SSE connection")
 				return
 			}
 
 			// Serialize and send the event to the client
-			data, err := json.Marshal(ev.Node) // (Or json.MarshalWrite if using json v2)
+			data, err := json.Marshal(ev.Node)
 			if err != nil {
 				h.logger.Error("failed to marshal event node", zap.Error(err))
 				continue
 			}
 
-			payload := fmt.Sprintf("event: %s\ndata: %s\n\n", ev.Type.String(), string(data))
-
-			if _, err := w.Write([]byte(payload)); err != nil {
+			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, ev.Type.String(), data); err != nil {
 				// If writing fails, the client disconnected (broken pipe)
 				h.logger.Debug("failed to write event payload, dropping client", zap.Error(err))
 				return
 			}
 
-			_ = rc.Flush()
+			if err := rc.Flush(); err != nil {
+				h.logger.Debug("flush failed after event, dropping client", zap.Error(err))
+				return
+			}
 
 		case <-keepAliveTicker.C:
 			// Send an SSE comment. The browser ignores it silently,
 			// but it tricks the Load Balancer into keeping the TCP connection alive.
-			_, err := w.Write([]byte(":ping\n\n"))
-			if err != nil {
+			if _, err := fmt.Fprint(w, ":ping\n\n"); err != nil {
 				// If ping write fails, the connection is physically broken
 				h.logger.Debug("failed to write keep-alive ping, dropping client", zap.Error(err))
 				return
 			}
-			_ = rc.Flush()
+			if err := rc.Flush(); err != nil {
+				h.logger.Debug("flush failed after ping, dropping client", zap.Error(err))
+				return
+			}
 		}
 	}
 }

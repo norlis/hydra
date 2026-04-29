@@ -27,6 +27,7 @@ type Node struct {
 	Zone       string             `json:"zone,omitempty"` // e.g. "us-east-1", "datacenter-south", "rack-4"
 	Interfaces []NetworkInterface `json:"interfaces"`
 	LastSeen   time.Time          `json:"last_seen"`
+	StartedAt  *time.Time         `json:"started_at,omitempty"`
 	Healthy    bool               `json:"healthy"`
 
 	// Labels allows injecting arbitrary metadata without changing the

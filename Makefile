@@ -30,7 +30,8 @@ help:
 	@echo "Uso: make [comando]"
 	@echo ""
 	@echo "## --- Ciclo de Vida del Build ---"
-	@echo "  build            Construye los binarios para todas las plataformas."
+	@echo "  ui               Compila el frontend (SolidJS → web/assets)."
+	@echo "  build            Compila el frontend y construye los binarios para todas las plataformas."
 	@echo "  amd64-build      Construye el binario para linux/amd64."
 	@echo "  arm64-build      Construye el binario para linux/arm64."
 	@echo "  clean            Elimina la carpeta de build."
@@ -116,7 +117,12 @@ run-local-sonar:
 ## ----------------------------------------
 ## Build y Clean
 ## ----------------------------------------
-build: clean
+.PHONY: ui
+ui:
+	@echo "==> Construyendo frontend..."
+	@cd frontend && npm ci && npm run build
+
+build: ui clean
 	@echo "==> Construyendo binarios..."
 	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o ./build/darwin/amd64/hydra ./cmd/hydra
 	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o ./build/darwin/arm64/hydra ./cmd/hydra

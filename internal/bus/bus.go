@@ -38,6 +38,7 @@ func (e EventType) String() string {
 
 // ClusterEvent describes a topology change.
 type ClusterEvent struct {
+	ID   string
 	Type EventType
 	Node topology.Node
 }

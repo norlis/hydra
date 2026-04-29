@@ -2,6 +2,8 @@ package bus
 
 import (
 	"sync"
+
+	"github.com/google/uuid"
 )
 
 // memoryEventBus is the in-memory implementation of EventBus.
@@ -37,6 +39,7 @@ func (b *memoryEventBus) Unsubscribe(ch <-chan ClusterEvent) {
 		if sub == ch {
 			b.subscribers[i] = b.subscribers[len(b.subscribers)-1]
 			b.subscribers = b.subscribers[:len(b.subscribers)-1]
+			close(sub)
 			return
 		}
 	}
@@ -44,6 +47,10 @@ func (b *memoryEventBus) Unsubscribe(ch <-chan ClusterEvent) {
 
 // Publish fans the event out to every active subscriber safely.
 func (b *memoryEventBus) Publish(event ClusterEvent) {
+	if id, err := uuid.NewV7(); err == nil {
+		event.ID = id.String()
+	}
+
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 

@@ -12,6 +12,10 @@ Accept: application/json
 GET {{host}}/health
 Accept: application/json
 
+### live
+GET {{host}}/live
+Accept: application/json
+
 
 ### Stream SSE de eventos de membresía (join/leave/update)
 # Deja esta request abierta: el cliente recibe primero una ráfaga de

@@ -29,6 +29,7 @@ type MemberlistDiscovery struct {
 	seedProvider SeedProvider
 	log          *zap.Logger
 	stopCh       chan struct{}
+	startedAt    *time.Time
 }
 
 // NewMemberlistDiscovery builds the gossip engine with all its dependencies.
@@ -46,6 +47,7 @@ func NewMemberlistDiscovery(
 		seedProvider: seedProvider,
 		log:          log,
 		stopCh:       make(chan struct{}),
+		startedAt:    new(time.Now().UTC()),
 	}
 }
 
@@ -245,6 +247,7 @@ func (m *MemberlistDiscovery) GetLocalNode() topology.Node {
 		Interfaces: interfaces,
 		Healthy:    true,
 		LastSeen:   time.Now(),
+		StartedAt:  m.startedAt,
 	}
 }
 

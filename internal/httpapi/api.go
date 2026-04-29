@@ -18,6 +18,7 @@ type Params struct {
 	Router               *http.ServeMux
 	Logger               *zap.Logger
 	Render               presenters.Presenters
+	Status               *health.Status
 	TopologyHandler      *handlers.TopologyHandler
 	WebHandler           *handlers.WebHandler
 	NodeReadinessChecker *cluster.NodeReadinessChecker
@@ -68,4 +69,5 @@ func NewHttpApi(params Params) {
 	params.Router.Handle("GET /health", use(health.NewProbe(map[string]port.Checker{
 		"node": params.NodeReadinessChecker,
 	})))
+	params.Router.Handle("GET /live", use(params.Status))
 }
