@@ -54,5 +54,6 @@ certs
 tmp/
 
 plan/
-
 dist/
+
+dist/web/assets/
