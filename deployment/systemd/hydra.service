@@ -12,10 +12,10 @@ LimitNOFILE=1048576
 
 # Variables por defecto (pueden ser sobreescritas por el usuario en /etc/default/hydra)
 Environment="ENVIRONMENT=aws"
-export HYDRA_CLOUDMAP_REGION=us-east-1
-export HYDRA_CLOUDMAP_NAMESPACE=hydra.mesh
-export HYDRA_CLOUDMAP_SERVICE=nodes
-export OTEL_SDK_DISABLED=true
+Environment="HYDRA_CLOUDMAP_REGION=us-east-1"
+Environment="HYDRA_CLOUDMAP_NAMESPACE=hydra.mesh"
+Environment="HYDRA_CLOUDMAP_SERVICE=nodes"
+Environment="OTEL_SDK_DISABLED=true"
 Environment="HYDRA_NODE_NAME=%H"
 
 [Install]
