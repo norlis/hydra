@@ -1,0 +1,55 @@
+version: 2
+
+project_name: hydra
+
+builds:
+  - id: hydra
+    main: ./cmd/hydra
+    binary: hydra
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/norlis/hydra/internal/version.GitHash={{.ShortCommit}}
+      - -X github.com/norlis/hydra/internal/version.Date={{.CommitDate}}
+
+nfpms:
+  - id: hydra-packages
+    homepage: https://github.com/norlis/hydra
+    maintainer: Norlis Viamonte <norlis.viamonte@gmail.com>
+    description: Self-clustering proxy mesh.
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: ./deployment/systemd/hydra.service
+        dst: /lib/systemd/system/hydra.service
+    scripts:
+      postinstall: ./deployment/systemd/postinstall.sh
+      preremove: ./deployment/systemd/preremove.sh
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'

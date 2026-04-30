@@ -11,8 +11,7 @@ import (
 
 // Config holds the Hydra node configuration loaded from environment variables.
 type Config struct {
-	Environment string `env:"ENVIRONMENT"  envDefault:"development"` // production | development | local
-	Provider    string `env:"PROVIDER"     envDefault:"aws"`         // aws | local
+	Environment string `env:"ENVIRONMENT"  envDefault:"local"` // aws | local
 	BasePort    int    `env:"BASE_PORT"    envDefault:"3128"`
 	ControlPort string `env:"CONTROL_PORT" envDefault:"9192"`
 	LogLevel    string `env:"LOG_LEVEL"    envDefault:"info"` // debug | info | warn | error

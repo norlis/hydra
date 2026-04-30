@@ -37,12 +37,12 @@ In `local` mode the nodes publish themselves over **mDNS** on the LAN and join e
 
 ### Common
 
-| Variable | Default | Description |
-|---|---|---|
+| Variable | Default       | Description |
+|---|---------------|---|
 | `ENVIRONMENT` | `development` | `local`, `development`, `production`, `aws`. Drives provider selection. |
-| `BASE_PORT` | `3128` | First service port; subsequent NICs get `BASE_PORT + i`. |
-| `CONTROL_PORT` | `9090` | HTTP control-plane port. |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. |
+| `BASE_PORT` | `3128`        | First service port; subsequent NICs get `BASE_PORT + i`. |
+| `CONTROL_PORT` | `9192`        | HTTP control-plane port. |
+| `LOG_LEVEL` | `info`        | `debug`, `info`, `warn`, `error`. |
 
 ### Gossip plane
 
@@ -119,11 +119,11 @@ Attach to the EC2 instance profile:
 ### Security group (inbound)
 
 | Port | Proto | Source | Purpose |
-|---|---|---|---|
+|------|---|---|---|
 | 7946 | TCP | Hydra SG (self) | memberlist gossip state sync / full TCP push-pull |
 | 7946 | UDP | Hydra SG (self) | memberlist gossip heartbeats |
 | 3128 | TCP | Client SG | Service port (first NIC). Add +1 per extra NIC. |
-| 9090 | TCP | Ops SG | Control-plane HTTP API |
+| 9192 | TCP | Ops SG | Control-plane HTTP API |
 
 Self-referencing SG rules (Hydra SG → Hydra SG) are the recommended
 pattern so nodes gossip only among themselves.
@@ -248,7 +248,7 @@ the standard `process.runtime.go.*` namespace.
 
 ## HTTP endpoints
 
-The control-plane listens on `CONTROL_PORT` (default `9090`):
+The control-plane listens on `CONTROL_PORT` (default `9192`):
 
 | Method | Path | Description |
 |---|---|---|

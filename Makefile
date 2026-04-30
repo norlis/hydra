@@ -159,3 +159,17 @@ mod-vendor:
 .PHONY: docs
 docs:
 	$(TOOLS_BIN_DIR)/swag init -g internal/entrypoint/httpapi/api.go --parseDependency
+
+
+## ----------------------------------------
+## GoReleaser
+## ----------------------------------------
+.PHONY: release-test release
+
+# Ejecuta un build de prueba local (no publica nada ni requiere tags)
+release-test: ui
+	goreleaser release --snapshot --clean
+
+# Ejecuta el release real (requiere un git tag reciente y un token de GitHub configurado)
+release: ui
+	goreleaser release --clean

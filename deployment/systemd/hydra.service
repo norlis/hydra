@@ -1,0 +1,22 @@
+[Unit]
+Description=Hydra Proxy Mesh
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# GoReleaser instalará el binario aquí por defecto:
+ExecStart=/usr/bin/hydra
+Restart=on-failure
+LimitNOFILE=1048576
+
+# Variables por defecto (pueden ser sobreescritas por el usuario en /etc/default/hydra)
+Environment="ENVIRONMENT=aws"
+export HYDRA_CLOUDMAP_REGION=us-east-1
+export HYDRA_CLOUDMAP_NAMESPACE=hydra.mesh
+export HYDRA_CLOUDMAP_SERVICE=nodes
+export OTEL_SDK_DISABLED=true
+Environment="HYDRA_NODE_NAME=%H"
+
+[Install]
+WantedBy=multi-user.target
