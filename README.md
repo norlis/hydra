@@ -180,6 +180,14 @@ GC profile shows runaway heap growth between collections.
 
 ### Sysctls (Linux hosts running Hydra)
 
+services & logs
+
+```shell
+systemctl status hydra
+# or 
+journalctl -u hydra -f
+```
+
 The proxy is a long-lived TCP server with high connection turnover.
 Crank these once on the host (or via a `DaemonSet`/userdata) to avoid
 hitting kernel-side limits before Go-side ones:

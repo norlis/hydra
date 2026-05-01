@@ -48,15 +48,25 @@ func NewRing(cfg *hydra.Config, eventBus bus.EventBus, log *zap.Logger) *Ring {
 // application terminates and the event channel is abandoned.
 func (r *Ring) run(ch <-chan bus.ClusterEvent) {
 	for ev := range ch {
-		addr := proxyAddr(ev.Node)
 		switch ev.Type {
 		case bus.NodeJoined, bus.NodeUpdated:
-			if addr == "" {
-				continue
+			// Register each network interface as a separate target in the ring
+			for _, iface := range ev.Node.Interfaces {
+				if iface.PrivateIP == "" || iface.ServicePort == 0 {
+					continue
+				}
+				addr := fmt.Sprintf("%s:%d", iface.PrivateIP, iface.ServicePort)
+
+				// Use a safe separator "::" to avoid conflicts if Node.ID contains hyphens
+				virtualID := fmt.Sprintf("%s::%s", ev.Node.ID, iface.Name)
+				r.replace(virtualID, addr)
 			}
-			r.replace(ev.Node.ID, addr)
 		case bus.NodeLeft:
-			r.remove(ev.Node.ID)
+			// When a node leaves, remove all its interfaces from the ring
+			for _, iface := range ev.Node.Interfaces {
+				virtualID := fmt.Sprintf("%s::%s", ev.Node.ID, iface.Name)
+				r.remove(virtualID)
+			}
 		}
 	}
 }
