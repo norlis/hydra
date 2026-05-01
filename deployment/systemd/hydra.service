@@ -7,6 +7,10 @@ Type=simple
 User=root
 # GoReleaser instalará el binario aquí por defecto:
 ExecStart=/usr/bin/hydra
+
+StandardOutput=append:/var/log/hydra.log
+StandardError=append:/var/log/hydra.log
+
 Restart=on-failure
 LimitNOFILE=1048576
 
