@@ -183,10 +183,34 @@ GC profile shows runaway heap growth between collections.
 services & logs
 
 ```shell
+yum install -y https://github.com/norlis/hydra/releases/download/v1.0.0-beta.6/hydra_1.0.0-beta.6_linux_arm64.rpm
+
+systemctl start hydra
+
+systemctl enable hydra
+
+# logs
 systemctl status hydra
+
 # or 
 journalctl -u hydra -f
 ```
+
+testing
+
+```shell
+NODE1=172.18.1.152
+NODE2=172.18.1.215
+
+# Verify affinity: same entity through different nodes must return the same exit IP
+curl --proxy http://$NODE1:3128 --proxy-header "X-Entity-ID: org-123" https://checkip.amazonaws.com/
+curl --proxy http://$NODE2:3128 --proxy-header "X-Entity-ID: org-123" https://checkip.amazonaws.com/
+
+# Different entity → different exit IP
+curl --proxy http://$NODE1:3128 --proxy-header "X-Entity-ID: org-456" https://checkip.amazonaws.com/
+curl --proxy http://$NODE2:3128 --proxy-header "X-Entity-ID: org-456122" https://checkip.amazonaws.com/
+```
+
 
 The proxy is a long-lived TCP server with high connection turnover.
 Crank these once on the host (or via a `DaemonSet`/userdata) to avoid
