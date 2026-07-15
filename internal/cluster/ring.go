@@ -2,13 +2,13 @@ package cluster
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 
 	hydra "github.com/norlis/hydra/internal"
 	"github.com/norlis/hydra/internal/bus"
 	"github.com/norlis/hydra/internal/hash"
 	"github.com/norlis/hydra/internal/topology"
-	"go.uber.org/zap"
 )
 
 // Endpoint is the resolved target returned by the ring for a given
@@ -26,14 +26,14 @@ type Endpoint struct {
 type Ring struct {
 	hash   *hash.ConsistentHashRing
 	selfID string
-	log    *zap.Logger
+	log    *slog.Logger
 
 	mu    sync.RWMutex
 	nodes map[string]string // nodeID -> proxyAddr
 }
 
 // NewRing builds an empty ring and starts the subscription loop.
-func NewRing(cfg *hydra.Config, eventBus bus.EventBus, log *zap.Logger) *Ring {
+func NewRing(cfg *hydra.Config, eventBus bus.EventBus, log *slog.Logger) *Ring {
 	r := &Ring{
 		hash:   hash.NewConsistentHash(50),
 		selfID: cfg.GossIPNodeName,
@@ -84,7 +84,7 @@ func (r *Ring) replace(nodeID, addr string) {
 
 	r.hash.RemoveNode(nodeID)
 	r.hash.AddNode(nodeID, addr)
-	r.log.Debug("ring: node added", zap.String("node", nodeID), zap.String("addr", addr))
+	r.log.Debug("ring: node added", slog.String("node", nodeID), slog.String("addr", addr))
 }
 
 func (r *Ring) remove(nodeID string) {
@@ -94,7 +94,7 @@ func (r *Ring) remove(nodeID string) {
 	r.mu.Unlock()
 	if existed {
 		r.hash.RemoveNode(nodeID)
-		r.log.Debug("ring: node removed", zap.String("node", nodeID))
+		r.log.Debug("ring: node removed", slog.String("node", nodeID))
 	}
 }
 

@@ -1,19 +1,19 @@
 package handlers
 
 import (
-	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
-	"github.com/norlis/hydra/internal/bus"
+	"github.com/norlis/httpgate/presenter"
 	"github.com/norlis/hydra/internal/cluster"
+	"github.com/norlis/hydra/internal/httpapi/httpx"
 	"github.com/norlis/hydra/internal/topology"
-	"go.uber.org/zap"
+	hlogger "github.com/norlis/hydra/pkg/logger"
 )
 
 type ProxyInfo struct {
@@ -21,19 +21,30 @@ type ProxyInfo struct {
 	Address string `json:"address"`
 }
 
+var (
+	errMissingAddress   = errors.New("missing address parameter")
+	errInvalidProxyAddr = errors.New("invalid proxy address")
+)
+
 type TopologyHandler struct {
-	render    presenters.Presenters
 	discovery cluster.Discovery
-	eventBus  bus.EventBus
-	logger    *zap.Logger
+	render    *httpx.Render
+	logger    *slog.Logger
 }
 
-func NewTopologyHandler(render presenters.Presenters, discovery cluster.Discovery, eventBus bus.EventBus, logger *zap.Logger) *TopologyHandler {
-	return &TopologyHandler{render: render, discovery: discovery, eventBus: eventBus, logger: logger}
+func NewTopologyHandler(discovery cluster.Discovery, render *httpx.Render, logger *slog.Logger) *TopologyHandler {
+	return &TopologyHandler{discovery: discovery, render: render, logger: logger}
+}
+
+// Register mounts the topology JSON routes on the chained /api/ sub-mux.
+func (h *TopologyHandler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/nodes", h.Nodes)
+	mux.HandleFunc("GET /api/proxies", h.Proxies)
+	mux.HandleFunc("GET /api/proxies/test", h.TestProxy)
 }
 
 // Always include the local node first so the caller can tell which
-// node served the request without having to inspect headers.
+// node served the request without inspecting headers.
 func (h *TopologyHandler) getAllNodes() []topology.Node {
 	active := h.discovery.GetActiveNodes()
 	local := h.discovery.GetLocalNode()
@@ -58,7 +69,7 @@ func (h *TopologyHandler) getAllNodes() []topology.Node {
 // @Accept json
 // @Produce json
 // @Success 200 {object}  []topology.Node ""
-// @Failure 500 {object} problem.ProblemDetail "Internal error"
+// @Failure 500 {object} problem.Detail "Internal error"
 // @Router /api/nodes [get].
 func (h *TopologyHandler) Nodes(w http.ResponseWriter, r *http.Request) {
 	h.render.JSON(w, r, h.getAllNodes())
@@ -71,8 +82,8 @@ func (h *TopologyHandler) Nodes(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Produce json
 // @Success 200 {object} []ProxyInfo ""
-// @Failure 500 {object} problem.ProblemDetail "Internal error"
-// @Router /api/proxies [get]
+// @Failure 500 {object} problem.Detail "Internal error"
+// @Router /api/proxies [get].
 func (h *TopologyHandler) Proxies(w http.ResponseWriter, r *http.Request) {
 	nodes := h.getAllNodes()
 
@@ -99,22 +110,22 @@ func (h *TopologyHandler) Proxies(w http.ResponseWriter, r *http.Request) {
 // @Param address query string true  "Proxy address (host:port, e.g. 192.168.1.10:3128)"
 // @Param target  query string false "Target URL to fetch through the proxy (default: https://checkip.amazonaws.com/)"
 // @Success 200 {object} map[string]interface{}
-// @Router /api/proxies/test [get]
+// @Router /api/proxies/test [get].
 func (h *TopologyHandler) TestProxy(w http.ResponseWriter, r *http.Request) {
 	proxyAddr := r.URL.Query().Get("address")
 	if proxyAddr == "" {
-		http.Error(w, "missing address parameter", http.StatusBadRequest)
+		h.render.Error(w, r, errMissingAddress, presenter.WithStatus(http.StatusBadRequest))
 		return
 	}
 
 	if strings.ContainsAny(proxyAddr, "@/?#") {
-		http.Error(w, "invalid proxy address", http.StatusBadRequest)
+		h.render.Error(w, r, errInvalidProxyAddr, presenter.WithStatus(http.StatusBadRequest))
 		return
 	}
 
 	proxyURL, err := url.Parse("http://" + proxyAddr)
 	if err != nil {
-		http.Error(w, "invalid proxy address", http.StatusBadRequest)
+		h.render.Error(w, r, errInvalidProxyAddr, presenter.WithStatus(http.StatusBadRequest))
 		return
 	}
 
@@ -128,123 +139,31 @@ func (h *TopologyHandler) TestProxy(w http.ResponseWriter, r *http.Request) {
 		Timeout:   5 * time.Second,
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, http.NoBody)
 	if err != nil {
-		http.Error(w, "failed to build request", http.StatusInternalServerError)
+		// 5xx: pass the real error so render logs it and reports it as detail.
+		h.render.Error(w, r, err, presenter.WithStatus(http.StatusInternalServerError))
 		return
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		h.logger.Warn("proxy test failed", zap.String("proxy", proxyAddr), zap.Error(err))
-		h.render.JSON(w, r, map[string]interface{}{
+		h.logger.Warn("proxy test failed", slog.String("proxy", proxyAddr), hlogger.Err(err))
+		h.render.JSON(w, r, map[string]any{
 			"proxy":   proxyAddr,
 			"success": false,
 			"error":   err.Error(),
 		})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
 
-	h.render.JSON(w, r, map[string]interface{}{
+	h.render.JSON(w, r, map[string]any{
 		"proxy":   proxyAddr,
 		"success": resp.StatusCode == http.StatusOK,
 		"ip":      strings.TrimSpace(string(body)),
 		"status":  resp.StatusCode,
 	})
-}
-
-// Events
-// @Summary SSE Cluster Events
-// @Description Real-time stream of cluster membership events (node.joined, node.left, node.updated) via Server-Sent Events.
-// @Tags topology
-// @Produce text/event-stream
-// @Success 200 {string} string "SSE stream of events"
-// @Failure 500 {string} string "Streaming unsupported"
-// @Router /api/events [get]
-func (h *TopologyHandler) Events(w http.ResponseWriter, r *http.Request) {
-	rc := http.NewResponseController(w)
-
-	// SSE headers + proxy buffering bypass (e.g. nginx X-Accel-Buffering)
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	// Clear the server WriteTimeout so long-lived SSE streams are not killed
-	// by the global deadline (Go 1.20+ per-request override).
-	_ = rc.SetWriteDeadline(time.Time{})
-
-	if err := rc.Flush(); err != nil {
-		h.logger.Error("streaming unsupported by ResponseWriter", zap.Error(err))
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	// Subscribe to EventBus and ensure safe cleanup with defer
-	ch := h.eventBus.Subscribe()
-	defer h.eventBus.Unsubscribe(ch)
-
-	h.logger.Debug("client subscribed to SSE events", zap.String("remote_addr", r.RemoteAddr))
-
-	// Tell the browser to wait 5 s before reconnecting instead of the default ~3 s.
-	_, _ = fmt.Fprint(w, "retry: 5000\n\n")
-	_ = rc.Flush()
-
-	// Keep-Alive ping to prevent timeouts in AWS ALB or intermediary proxies
-	keepAliveTicker := time.NewTicker(15 * time.Second)
-	defer keepAliveTicker.Stop()
-
-	ctx := r.Context()
-
-	// Event loop
-	for {
-		select {
-		case <-ctx.Done():
-			// Client closed the connection (e.g., closed the browser tab)
-			h.logger.Debug("client disconnected from SSE", zap.String("remote_addr", r.RemoteAddr))
-			return
-
-		case ev, ok := <-ch:
-			if !ok {
-				// Event bus channel was closed by Unsubscribe (e.g. graceful shutdown)
-				h.logger.Warn("event bus channel closed, terminating SSE connection")
-				return
-			}
-
-			// Serialize and send the event to the client
-			data, err := json.Marshal(ev.Node)
-			if err != nil {
-				h.logger.Error("failed to marshal event node", zap.Error(err))
-				continue
-			}
-
-			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, ev.Type.String(), data); err != nil {
-				// If writing fails, the client disconnected (broken pipe)
-				h.logger.Debug("failed to write event payload, dropping client", zap.Error(err))
-				return
-			}
-
-			if err := rc.Flush(); err != nil {
-				h.logger.Debug("flush failed after event, dropping client", zap.Error(err))
-				return
-			}
-
-		case <-keepAliveTicker.C:
-			// Send an SSE comment. The browser ignores it silently,
-			// but it tricks the Load Balancer into keeping the TCP connection alive.
-			if _, err := fmt.Fprint(w, ":ping\n\n"); err != nil {
-				// If ping write fails, the connection is physically broken
-				h.logger.Debug("failed to write keep-alive ping, dropping client", zap.Error(err))
-				return
-			}
-			if err := rc.Flush(); err != nil {
-				h.logger.Debug("flush failed after ping, dropping client", zap.Error(err))
-				return
-			}
-		}
-	}
 }

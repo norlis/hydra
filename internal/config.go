@@ -2,11 +2,12 @@ package hydra
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/norlis/hydra/pkg/env"
-	"go.uber.org/zap"
 )
 
 // Config holds the Hydra node configuration loaded from environment variables.
@@ -15,6 +16,11 @@ type Config struct {
 	BasePort    int    `env:"BASE_PORT"    envDefault:"3128"`
 	ControlPort string `env:"CONTROL_PORT" envDefault:"9192"`
 	LogLevel    string `env:"LOG_LEVEL"    envDefault:"info"` // debug | info | warn | error
+
+	// DrainDelay is how long the /ready probe reports draining (503)
+	// before the control-plane server begins its shutdown, giving a
+	// load balancer time to stop routing new requests to this node.
+	DrainDelay time.Duration `env:"HYDRA_DRAIN_DELAY" envDefault:"5s"`
 
 	// Gossip plane (memberlist).
 	GossIPNodeName       string        `env:"HYDRA_NODE_NAME"              envDefault:"node"`
@@ -39,7 +45,7 @@ type Config struct {
 	// Allowed destination ports for CONNECT. Any other port is rejected
 	// with 403 before dialing. Default 443,80 — opening more is a
 	// conscious choice (SMTP/SSH/RDP turn the proxy into a relay).
-	ProxyAllowedPorts []int `env:"HYDRA_PROXY_ALLOWED_PORTS" envSeparator:"," envDefault:"443,80"`
+	ProxyAllowedPorts []int `env:"HYDRA_PROXY_ALLOWED_PORTS" envDefault:"443,80" envSeparator:","`
 
 	// Extra CIDR ranges to deny in addition to the built-in list
 	// (RFC1918, loopback, link-local, IETF reserved, IPv6 embeddings).
@@ -84,7 +90,7 @@ type Config struct {
 // validates fields that need interpretation (hex secrets, enumerations).
 // Returns a descriptive error for any malformed value so fx aborts at
 // startup instead of at first use.
-func NewConfigFromEnv(logger *zap.Logger) (*Config, error) {
+func NewConfigFromEnv(logger *slog.Logger) (*Config, error) {
 	cfg := &Config{}
 	if err := env.Parse(cfg); err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
@@ -106,7 +112,7 @@ func NewConfigFromEnv(logger *zap.Logger) (*Config, error) {
 		cfg.ProxyAuthMode = "none"
 	case "basic":
 		if cfg.ProxyAuthUser == "" || cfg.ProxyAuthPass == "" {
-			return nil, fmt.Errorf("HYDRA_PROXY_AUTH_MODE=basic requires HYDRA_PROXY_AUTH_USER and HYDRA_PROXY_AUTH_PASS")
+			return nil, errors.New("HYDRA_PROXY_AUTH_MODE=basic requires HYDRA_PROXY_AUTH_USER and HYDRA_PROXY_AUTH_PASS")
 		}
 	default:
 		return nil, fmt.Errorf("HYDRA_PROXY_AUTH_MODE must be one of: none, basic (got %q)", cfg.ProxyAuthMode)

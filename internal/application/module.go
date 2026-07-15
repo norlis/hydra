@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	hydra "github.com/norlis/hydra/internal"
@@ -11,7 +12,6 @@ import (
 	"github.com/norlis/hydra/internal/network/aws"
 	"github.com/norlis/hydra/internal/network/local"
 	"go.uber.org/fx"
-	"go.uber.org/zap"
 )
 
 // Module holds the environment-aware provider selection. Keeping this
@@ -28,7 +28,7 @@ var Module = fx.Module("application",
 //	aws   -> aws.IMDSProvider (queries EC2 instance metadata, IMDSv2)
 //
 // Cloud-specific providers (GCP, Azure, ...) should be added as new cases.
-func NewNetworkProvider(cfg *hydra.Config, log *zap.Logger) network.Provider {
+func NewNetworkProvider(cfg *hydra.Config, log *slog.Logger) network.Provider {
 	switch strings.ToLower(cfg.Environment) {
 	case "aws":
 		return aws.NewIMDSProvider(cfg, log)
@@ -43,8 +43,9 @@ func NewNetworkProvider(cfg *hydra.Config, log *zap.Logger) network.Provider {
 //	local -> seed.MDNSProvider (mDNS autodiscovery on the LAN)
 //	aws   -> seed.CloudMap     (AWS Cloud Map service discovery)
 //
-// Any other environment gets NoopSeedProvider and relies only on the
-// static seeds from HYDRA_GOSSIP_SEEDS.
+// Any other value (standalone, single, ...) runs a single node with no
+// discovery via NoopSeedProvider; peers join only through the static
+// HYDRA_GOSSIP_SEEDS.
 func NewSeedProvider(
 	lc fx.Lifecycle,
 	cfg *hydra.Config,
@@ -77,6 +78,7 @@ func NewSeedProvider(
 		return cm, nil
 
 	default:
+		// standalone / single / unknown: single node, no discovery.
 		return cluster.NoopSeedProvider{}, nil
 	}
 }

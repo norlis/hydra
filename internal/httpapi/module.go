@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -11,11 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
-	"github.com/norlis/httpgate/pkg/application/health"
+	"github.com/norlis/httpgate/health"
 	hydra "github.com/norlis/hydra/internal"
+	"github.com/norlis/hydra/internal/cluster"
 	"github.com/norlis/hydra/internal/httpapi/handlers"
+	"github.com/norlis/hydra/internal/httpapi/httpx"
 	"github.com/norlis/hydra/internal/version"
+	hlogger "github.com/norlis/hydra/pkg/logger"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -24,7 +27,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.uber.org/fx"
-	"go.uber.org/zap"
 )
 
 // proxyControlMaxHeaderBytes — even on the control plane we cap headers
@@ -42,9 +44,14 @@ const proxyControlMaxHeaderBytes = 16 << 10
 var Module = fx.Module("httpapi",
 	fx.Provide(NewMeterProvider),
 	fx.Provide(NewHttpServerMux),
-	fx.Provide(presenters.NewPresenters),
-	fx.Provide(handlers.NewTopologyHandler),
+	fx.Provide(httpx.New),
 	fx.Provide(handlers.NewWebHandler),
+	fx.Provide(handlers.NewEventsHandler),
+	fx.Provide(NewReadinessGate),
+	fx.Provide(
+		fx.Annotate(handlers.NewTopologyHandler, fx.As(new(Route)), fx.ResultTags(`group:"routes"`)),
+		fx.Annotate(handlers.NewResolveHandler, fx.As(new(Route)), fx.ResultTags(`group:"routes"`)),
+	),
 	fx.Provide(func() *health.Status {
 		version := version.GitHash
 		if version == "" {
@@ -76,7 +83,7 @@ var Module = fx.Module("httpapi",
 // otel.Meter(...) directly (and future tracing work) find it without
 // extra wiring. Shutdown flushes pending exports through the fx
 // lifecycle hook.
-func NewMeterProvider(lc fx.Lifecycle, cfg *hydra.Config, log *zap.Logger) (metric.MeterProvider, error) {
+func NewMeterProvider(lc fx.Lifecycle, cfg *hydra.Config, log *slog.Logger) (metric.MeterProvider, error) {
 	ctx := context.Background()
 
 	if strings.ToLower(os.Getenv("OTEL_SDK_DISABLED")) == "true" {
@@ -139,13 +146,13 @@ func NewMeterProvider(lc fx.Lifecycle, cfg *hydra.Config, log *zap.Logger) (metr
 	// package. Uses the global MeterProvider just installed, so it
 	// must run after SetMeterProvider.
 	if err := runtime.Start(); err != nil {
-		log.Warn("runtime instrumentation failed to start", zap.Error(err))
+		log.Warn("runtime instrumentation failed to start", hlogger.Err(err))
 	}
 
 	lc.Append(fx.Hook{
 		OnStop: func(ctx context.Context) error {
 			if err := provider.Shutdown(ctx); err != nil {
-				log.Warn("meter provider shutdown failed", zap.Error(err))
+				log.Warn("meter provider shutdown failed", hlogger.Err(err))
 				return err
 			}
 			return nil
@@ -169,7 +176,17 @@ func MountAdminEndpoints(mux *http.ServeMux) {
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }
 
-func NewHttpServerMux(lc fx.Lifecycle, cfg *hydra.Config, logger *zap.Logger) *http.ServeMux {
+// NewReadinessGate builds the /ready probe wrapped in a drain gate. The
+// gate is flipped to draining by the control-plane server's OnStop hook
+// (NewHttpServerMux) before shutdown, so the drain and the shutdown live in
+// one hook — their order is guaranteed rather than relying on OnStop
+// reverse-registration order.
+func NewReadinessGate(checker *cluster.NodeReadinessChecker) *health.Readiness {
+	probe := health.NewProbe(map[string]health.Checker{"node": checker})
+	return health.NewReadiness(probe)
+}
+
+func NewHttpServerMux(lc fx.Lifecycle, cfg *hydra.Config, ready *health.Readiness, log *slog.Logger) *http.ServeMux {
 	mux := http.NewServeMux()
 	listener := net.JoinHostPort("0.0.0.0", cfg.ControlPort)
 
@@ -185,24 +202,39 @@ func NewHttpServerMux(lc fx.Lifecycle, cfg *hydra.Config, logger *zap.Logger) *h
 
 	lc.Append(fx.Hook{
 		OnStart: func(_ context.Context) error {
-			logger.Info("control plane listening", zap.String("addr", listener))
+			log.Info("control plane listening", slog.String("addr", listener))
 			go func() {
 				if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					logger.Error("control plane server error", zap.Error(err))
+					log.Error("control plane server error", hlogger.Err(err))
 				}
 			}()
 			return nil
 		},
-		OnStop: func(_ context.Context) error {
-			logger.Info("stopping control plane")
+		OnStop: func(ctx context.Context) error {
+			// Signal draining first so a load balancer stops routing before
+			// we stop accepting, then wait DrainDelay for it to notice.
+			ready.MarkDraining()
+			if cfg.DrainDelay > 0 {
+				log.Info("draining before shutdown", slog.Duration("delay", cfg.DrainDelay))
+				select {
+				case <-time.After(cfg.DrainDelay):
+				case <-ctx.Done():
+				}
+			}
+
+			log.Info("stopping control plane")
+			// Detached from the fx stop ctx so shutdown always gets its full
+			// budget even if the drain consumed it. Note: an active /api/events
+			// SSE client is never idle, so Shutdown waits the full window and
+			// logs a timeout — harmless (fx proceeds).
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
 			if err := server.Shutdown(shutdownCtx); err != nil {
-				logger.Error("control plane shutdown failed", zap.Error(err))
+				log.Error("control plane shutdown failed", hlogger.Err(err))
 				return fmt.Errorf("failed to shutdown HTTP server: %w", err)
 			}
-			logger.Info("control plane stopped")
+			log.Info("control plane stopped")
 			return nil
 		},
 	})

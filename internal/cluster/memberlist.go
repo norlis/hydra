@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/norlis/hydra/internal/bus"
 	"github.com/norlis/hydra/internal/network"
 	"github.com/norlis/hydra/internal/topology"
-	"go.uber.org/zap"
+	hlogger "github.com/norlis/hydra/pkg/logger"
 )
 
 // MemberlistDiscovery implements the Discovery interface using HashiCorp
@@ -27,7 +28,7 @@ type MemberlistDiscovery struct {
 	eventBus     bus.EventBus
 	netProvider  network.Provider
 	seedProvider SeedProvider
-	log          *zap.Logger
+	log          *slog.Logger
 	stopCh       chan struct{}
 	startedAt    *time.Time
 }
@@ -38,7 +39,7 @@ func NewMemberlistDiscovery(
 	eventBus bus.EventBus,
 	netProvider network.Provider,
 	seedProvider SeedProvider,
-	log *zap.Logger,
+	log *slog.Logger,
 ) *MemberlistDiscovery {
 	return &MemberlistDiscovery{
 		cfg:          cfg,
@@ -108,7 +109,7 @@ func (m *MemberlistDiscovery) Start() error {
 	if seeds := m.resolveSeeds(); len(seeds) > 0 {
 		if _, err := m.list.Join(seeds); err != nil {
 			m.log.Warn("initial join failed, will retry in background",
-				zap.Strings("seeds", seeds), zap.Error(err))
+				slog.Any("seeds", seeds), hlogger.Err(err))
 		}
 	}
 
@@ -126,7 +127,7 @@ func (m *MemberlistDiscovery) Stop() error {
 	}
 	// Announce graceful leave and give the cluster 5s to propagate it.
 	if err := m.list.Leave(5 * time.Second); err != nil {
-		m.log.Warn("graceful leave failed", zap.Error(err))
+		m.log.Warn("graceful leave failed", hlogger.Err(err))
 	}
 	return m.list.Shutdown()
 }
@@ -165,7 +166,7 @@ func (m *MemberlistDiscovery) autoJoinLoop() {
 				continue
 			}
 			if _, err := m.list.Join(seeds); err != nil {
-				m.log.Debug("auto-join tick failed", zap.Error(err))
+				m.log.Debug("auto-join tick failed", hlogger.Err(err))
 			}
 		}
 	}
@@ -186,7 +187,7 @@ func (m *MemberlistDiscovery) GetActiveNodes() []topology.Node {
 
 // decodeMember prefers the gossiped Meta payload; falls back to a
 // minimal stub only when Meta is empty or cannot be parsed.
-func decodeMember(member *memberlist.Node, logger *zap.Logger) topology.Node {
+func decodeMember(member *memberlist.Node, logger *slog.Logger) topology.Node {
 	if len(member.Meta) > 0 {
 		if raw, err := decodeMeta(member.Meta); err == nil {
 			var node topology.Node
@@ -199,8 +200,8 @@ func decodeMember(member *memberlist.Node, logger *zap.Logger) topology.Node {
 		}
 		if logger != nil {
 			logger.Warn("failed to decode peer NodeMeta, falling back to stub",
-				zap.String("node_id", member.Name),
-				zap.String("addr", member.Addr.String()))
+				slog.String("node_id", member.Name),
+				slog.String("addr", member.Addr.String()))
 		}
 	}
 	return topology.Node{
@@ -239,7 +240,7 @@ func decodeMeta(meta []byte) ([]byte, error) {
 func (m *MemberlistDiscovery) GetLocalNode() topology.Node {
 	interfaces, err := m.netProvider.Discover()
 	if err != nil {
-		m.log.Error("failed to discover local interfaces", zap.Error(err))
+		m.log.Error("failed to discover local interfaces", hlogger.Err(err))
 		return topology.Node{ID: m.cfg.GossIPNodeName}
 	}
 	return topology.Node{
@@ -269,7 +270,7 @@ func (m *MemberlistDiscovery) resolveAdvertiseAddr() (string, error) {
 	}
 
 	addr := ifaces[0].PrivateIP
-	m.log.Info("AdvertiseAddr autodiscovered", zap.String("addr", addr))
+	m.log.Info("AdvertiseAddr autodiscovered", slog.String("addr", addr))
 	return addr, nil
 }
 
@@ -286,12 +287,12 @@ func (m *MemberlistDiscovery) resolveSeeds() []string {
 	if m.seedProvider != nil {
 		discovered, err := m.seedProvider.Discover()
 		if err != nil {
-			m.log.Warn("dynamic seed discovery failed", zap.Error(err))
+			m.log.Warn("dynamic seed discovery failed", hlogger.Err(err))
 		} else if len(discovered) > 0 {
 			for _, s := range discovered {
 				seedSet[s] = struct{}{}
 			}
-			m.log.Debug("dynamic seeds added", zap.Strings("seeds", discovered))
+			m.log.Debug("dynamic seeds added", slog.Any("seeds", discovered))
 		}
 	}
 

@@ -1,18 +1,19 @@
 package network
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/norlis/hydra/internal/topology"
-	"go.uber.org/zap"
+	"github.com/norlis/hydra/pkg/logger"
 )
 
 // Registry periodically discovers interfaces through a Provider and
 // keeps a concurrency-safe cache.
 type Registry struct {
 	provider Provider
-	log      *zap.Logger
+	log      *slog.Logger
 
 	mu     sync.RWMutex
 	ifaces []topology.NetworkInterface
@@ -22,7 +23,7 @@ type Registry struct {
 
 // NewRegistry initializes the registry, performs an initial discovery
 // and launches a background loop that refreshes the cache.
-func NewRegistry(provider Provider, log *zap.Logger) *Registry {
+func NewRegistry(provider Provider, log *slog.Logger) *Registry {
 	r := &Registry{
 		provider: provider,
 		log:      log,
@@ -56,7 +57,7 @@ func (r *Registry) loop() {
 func (r *Registry) Refresh() {
 	ifaces, err := r.provider.Discover()
 	if err != nil {
-		r.log.Error("network discovery failed", zap.Error(err))
+		r.log.Error("network discovery failed", logger.Err(err))
 		return
 	}
 
@@ -64,7 +65,7 @@ func (r *Registry) Refresh() {
 	r.ifaces = ifaces
 	r.mu.Unlock()
 
-	r.log.Debug("interfaces discovered and cached", zap.Int("count", len(ifaces)))
+	r.log.Debug("interfaces discovered and cached", slog.Int("count", len(ifaces)))
 }
 
 // All returns a safe copy of every known interface.
