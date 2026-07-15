@@ -7,16 +7,25 @@ Type=simple
 User=root
 # GoReleaser instalará el binario aquí por defecto:
 ExecStart=/usr/bin/hydra
+
+StandardOutput=append:/var/log/hydra.log
+StandardError=append:/var/log/hydra.log
+
 Restart=on-failure
 LimitNOFILE=1048576
 
-# Variables por defecto (pueden ser sobreescritas por el usuario en /etc/default/hydra)
-Environment="ENVIRONMENT=aws"
-Environment="HYDRA_CLOUDMAP_REGION=us-east-1"
-Environment="HYDRA_CLOUDMAP_NAMESPACE=hydra.mesh"
-Environment="HYDRA_CLOUDMAP_SERVICE=nodes"
+# Default mode: single standalone node (no IMDS/CloudMap/mDNS).
+# Override any of these in /etc/default/hydra (survives package upgrades).
+Environment="ENVIRONMENT=standalone"
 Environment="OTEL_SDK_DISABLED=true"
 Environment="HYDRA_NODE_NAME=%H"
+EnvironmentFile=-/etc/default/hydra
+
+# aws example
+# Environment="ENVIRONMENT=aws"
+# Environment="HYDRA_CLOUDMAP_REGION=us-east-1"
+# Environment="HYDRA_CLOUDMAP_NAMESPACE=hydra.mesh"
+# Environment="HYDRA_CLOUDMAP_SERVICE=nodes"
 
 [Install]
 WantedBy=multi-user.target

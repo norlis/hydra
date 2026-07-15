@@ -1,60 +1,66 @@
 package logger
 
 import (
+	"io"
+	"log/slog"
 	"os"
 	"strings"
-
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
-type LogLevel string
-
-func (l LogLevel) AtomicLevel() zapcore.Level {
-	switch strings.ToLower(string(l)) {
+// ParseLevel maps a LOG_LEVEL string (case-insensitive) to a slog.Level.
+// Empty or unknown values default to Info.
+func ParseLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
 	case "debug":
-		return zapcore.DebugLevel
-	case "info":
-		return zapcore.InfoLevel
+		return slog.LevelDebug
 	case "warn":
-		return zapcore.WarnLevel
+		return slog.LevelWarn
 	case "error":
-		return zapcore.ErrorLevel
+		return slog.LevelError
 	default:
-		return zapcore.InfoLevel
+		return slog.LevelInfo
 	}
 }
 
-// NewLogger builds a production JSON logger at the given level. Pass
-// an empty string to default to info. The level is intentionally a
-// plain string (not a *Config) so this package stays independent of
-// the internal/hydra package.
-func NewLogger(level string) *zap.Logger {
-	atomicLevel := zap.NewAtomicLevelAt(LogLevel(level).AtomicLevel())
-	// var a fxevent.Logger
-	encoderCfg := zap.NewProductionEncoderConfig()
-	encoderCfg.TimeKey = "timestamp"
-	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
-	encoderCfg.EncodeDuration = zapcore.StringDurationEncoder
+// New builds a production JSON logger writing to stderr. The level is
+// intentionally a plain string (not a *Config) so this package stays
+// independent of the internal/hydra package.
+func New(level string) *slog.Logger {
+	return NewWithLevel(ParseLevel(level))
+}
 
-	config := zap.Config{
-		Level:             atomicLevel,
-		Development:       false,
-		DisableCaller:     false,
-		DisableStacktrace: false,
-		Sampling:          nil,
-		Encoding:          "json",
-		EncoderConfig:     encoderCfg,
-		OutputPaths: []string{
-			"stderr",
-		},
-		ErrorOutputPaths: []string{
-			"stderr",
-		},
-		InitialFields: map[string]any{
-			"pid": os.Getpid(),
-		},
-	}
+// NewWithLevel is New with an explicit slog.Level, for callers that
+// need to derive the level programmatically (e.g. the fx event logger).
+func NewWithLevel(level slog.Level) *slog.Logger {
+	return newWithWriter(level, os.Stderr)
+}
 
-	return zap.Must(config.Build())
+// newWithWriter is the testable core. Hybrid schema over slog defaults:
+// lowercase level, "timestamp" key instead of "time", and a pid field.
+func newWithWriter(level slog.Level, w io.Writer) *slog.Logger {
+	h := slog.NewJSONHandler(w, &slog.HandlerOptions{
+		Level:     level,
+		AddSource: true,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) > 0 {
+				return a
+			}
+			switch a.Key {
+			case slog.TimeKey:
+				a.Key = "timestamp"
+			case slog.LevelKey:
+				if lvl, ok := a.Value.Any().(slog.Level); ok {
+					a.Value = slog.StringValue(strings.ToLower(lvl.String()))
+				}
+			}
+			return a
+		},
+	})
+	return slog.New(h).With(slog.Int("pid", os.Getpid()))
+}
+
+// Err adapts an error to the canonical "error" attribute (replaces zap.Error).
+// slog's JSONHandler renders error values via err.Error().
+func Err(e error) slog.Attr {
+	return slog.Any("error", e)
 }

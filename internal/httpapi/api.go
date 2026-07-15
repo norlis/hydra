@@ -1,27 +1,26 @@
 package httpapi
 
 import (
+	"log/slog"
 	"net/http"
 
-	"github.com/norlis/httpgate/pkg/adapter/apidriven/middleware"
-	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
-	"github.com/norlis/httpgate/pkg/application/health"
-	"github.com/norlis/httpgate/pkg/port"
+	"github.com/norlis/httpgate/health"
+	"github.com/norlis/httpgate/middleware"
 	"github.com/norlis/hydra/internal/cluster"
 	"github.com/norlis/hydra/internal/httpapi/handlers"
 	"go.uber.org/fx"
-	"go.uber.org/zap"
 )
 
 type Params struct {
 	fx.In
 	Router               *http.ServeMux
-	Logger               *zap.Logger
-	Render               presenters.Presenters
+	Logger               *slog.Logger
 	Status               *health.Status
-	TopologyHandler      *handlers.TopologyHandler
+	Readiness            *health.Readiness
+	EventsHandler        *handlers.EventsHandler
 	WebHandler           *handlers.WebHandler
 	NodeReadinessChecker *cluster.NodeReadinessChecker
+	Routes               []Route `group:"routes"`
 }
 
 // NewHttpApi
@@ -37,37 +36,37 @@ type Params struct {
 // @openapi 3.0.0.
 func NewHttpApi(params Params) {
 	base := []middleware.Middleware{
-		middleware.TraceId(middleware.WithHeaderName("x-request-id"), middleware.WithLogger(params.Logger)),
-		middleware.APIErrorMiddleware(
+		middleware.TraceID(middleware.WithHeaderName("x-request-id"), middleware.WithLogger(params.Logger)),
+		middleware.InterceptStatus(
 			middleware.WithIntercept(http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError),
-			middleware.WithCustomMessage(http.StatusNotFound, "resource not found"),
-			middleware.WithCustomMessage(http.StatusMethodNotAllowed, "method is not allowed for this resource."),
+			middleware.WithMessage(http.StatusNotFound, "resource not found"),
+			middleware.WithMessage(http.StatusMethodNotAllowed, "method is not allowed for this resource."),
 		),
-		middleware.Recover(params.Logger, params.Render),
-		middleware.RequestLogger(params.Logger),
-		middleware.AllowAll(params.Logger).Middleware,
+		middleware.Recover(params.Logger),
+		middleware.RequestLogger(params.Logger, middleware.WithSkipPaths("/health", "/live")),
+		middleware.AllowAll(),
 	}
 
-	use := middleware.Chain(base...)
+	chain := middleware.New(base...)
 
 	api := http.NewServeMux()
-	api.HandleFunc("GET /api/nodes", params.TopologyHandler.Nodes)
-	api.HandleFunc("GET /api/proxies", params.TopologyHandler.Proxies)
-	api.HandleFunc("GET /api/proxies/test", params.TopologyHandler.TestProxy)
-
-	params.Router.Handle("/api/", use(api))
+	for _, route := range params.Routes {
+		route.Register(api)
+	}
+	params.Router.Handle("/api/", chain.Then(api))
 
 	// SSE: registered directly to bypass response-buffering middleware that
 	// wraps ResponseWriter without implementing http.Flusher / Unwrap.
-	params.Router.HandleFunc("GET /api/events", params.TopologyHandler.Events)
+	params.Router.HandleFunc("GET /api/events", params.EventsHandler.Events)
 
 	// UI
 	params.Router.HandleFunc("GET /events", params.WebHandler.EventsPage)
 	params.Router.Handle("GET /assets/", http.StripPrefix("/assets/", params.WebHandler.ServeAssets()))
 
-	// health
-	params.Router.Handle("GET /health", use(health.NewProbe(map[string]port.Checker{
+	// health / readiness / liveness
+	params.Router.Handle("GET /health", chain.Then(health.NewProbe(map[string]health.Checker{
 		"node": params.NodeReadinessChecker,
 	})))
-	params.Router.Handle("GET /live", use(params.Status))
+	params.Router.Handle("GET /ready", chain.Then(params.Readiness))
+	params.Router.Handle("GET /live", chain.Then(params.Status))
 }

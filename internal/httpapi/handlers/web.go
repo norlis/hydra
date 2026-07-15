@@ -2,26 +2,27 @@ package handlers
 
 import (
 	"io/fs"
+	"log/slog"
 	"net/http"
 
+	"github.com/norlis/hydra/pkg/logger"
 	"github.com/norlis/hydra/web"
-	"go.uber.org/zap"
 )
 
 type WebHandler struct {
-	logger  *zap.Logger
+	logger  *slog.Logger
 	statics http.Handler
 }
 
-func NewWebHandler(logger *zap.Logger) *WebHandler {
+func NewWebHandler(log *slog.Logger) *WebHandler {
 	subFs, err := fs.Sub(web.Files, "assets")
 	if err != nil {
-		logger.Error("Failed to create sub filesystem for assets", zap.Error(err))
+		log.Error("Failed to create sub filesystem for assets", logger.Err(err))
 		return nil
 	}
 
 	return &WebHandler{
-		logger:  logger,
+		logger:  log,
 		statics: http.FileServer(http.FS(subFs)),
 	}
 }

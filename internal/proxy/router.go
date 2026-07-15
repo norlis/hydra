@@ -1,13 +1,13 @@
 package proxy
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/norlis/hydra/internal/cluster"
 	"github.com/norlis/hydra/internal/proxy/metrics"
 	"github.com/norlis/hydra/internal/topology"
-	"go.uber.org/zap"
 )
 
 // EntityHeader is the per-request hint the router uses to place the
@@ -32,7 +32,7 @@ type Router struct {
 	ring      *cluster.Ring
 	forwarder Forwarder
 	metrics   *metrics.Metrics
-	log       *zap.Logger
+	log       *slog.Logger
 }
 
 func NewRouter(
@@ -40,14 +40,14 @@ func NewRouter(
 	ring *cluster.Ring,
 	forwarder Forwarder,
 	mtr *metrics.Metrics,
-	log *zap.Logger,
+	log *slog.Logger,
 ) *Router {
 	return &Router{
 		iface:     iface,
 		ring:      ring,
 		forwarder: forwarder,
 		metrics:   mtr,
-		log:       log.With(zap.String("iface", iface.Name)),
+		log:       log.With(slog.String("iface", iface.Name)),
 	}
 }
 
@@ -74,14 +74,14 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// tunnel_done in forwarder.go: one structured line containing every
 	// field needed for post-mortem and audit.
 	r.log.Info("http_done",
-		zap.String("event", "http"),
-		zap.String("method", req.Method),
-		zap.String("host", req.Host),
-		zap.String("entity_id", req.Header.Get(EntityHeader)),
-		zap.String("decision", decision),
-		zap.String("peer", peer),
-		zap.Int("status", rec.status),
-		zap.Duration("duration", time.Since(start)),
+		slog.String("event", "http"),
+		slog.String("method", req.Method),
+		slog.String("host", req.Host),
+		slog.String("entity_id", req.Header.Get(EntityHeader)),
+		slog.String("decision", decision),
+		slog.String("peer", peer),
+		slog.Int("status", rec.status),
+		slog.Duration("duration", time.Since(start)),
 	)
 }
 
@@ -115,11 +115,11 @@ func (r *Router) decisionFor(req *http.Request, peer string) string {
 //	              avoid ping-pong loops during ring convergence
 func (r *Router) logDecision(req *http.Request, peer, decision string) {
 	r.log.Info("proxy request",
-		zap.String("method", req.Method),
-		zap.String("host", req.Host),
-		zap.String("entity_id", req.Header.Get(EntityHeader)),
-		zap.String("decision", decision),
-		zap.String("peer", peer),
+		slog.String("method", req.Method),
+		slog.String("host", req.Host),
+		slog.String("entity_id", req.Header.Get(EntityHeader)),
+		slog.String("decision", decision),
+		slog.String("peer", peer),
 	)
 }
 

@@ -31,6 +31,9 @@ nfpms:
     contents:
       - src: ./deployment/systemd/hydra.service
         dst: /lib/systemd/system/hydra.service
+      - src: ./deployment/systemd/hydra.default
+        dst: /etc/default/hydra
+        type: config
     scripts:
       postinstall: ./deployment/systemd/postinstall.sh
       preremove: ./deployment/systemd/preremove.sh
