@@ -1,6 +1,9 @@
 package cluster
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 type NodeReadinessChecker struct {
 	discovery Discovery
@@ -10,7 +13,9 @@ func NewNodeReadinessChecker(d Discovery) *NodeReadinessChecker {
 	return &NodeReadinessChecker{discovery: d}
 }
 
-func (c *NodeReadinessChecker) Check() error {
+// Check satisfies httpgate's health.Checker. The context is accepted
+// for interface compliance; the check itself is synchronous and local.
+func (c *NodeReadinessChecker) Check(_ context.Context) error {
 	if c.discovery == nil {
 		return errors.New("cluster discovery is not initialized")
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -18,8 +19,8 @@ import (
 	"github.com/norlis/hydra/internal/proxy/ipcheck"
 	"github.com/norlis/hydra/internal/proxy/limiter"
 	"github.com/norlis/hydra/internal/proxy/metrics"
+	"github.com/norlis/hydra/pkg/logger"
 	"go.uber.org/fx"
-	"go.uber.org/zap"
 )
 
 // proxyMaxHeaderBytes caps the total size of incoming request headers.
@@ -57,7 +58,7 @@ func StartProxyServers(
 	tracker *conntrack.Tracker,
 	tunnelLimit *limiter.Tunnel,
 	mtr *metrics.Metrics,
-	log *zap.Logger,
+	log *slog.Logger,
 ) error {
 	ifaces := reg.All()
 
@@ -142,19 +143,19 @@ func StartProxyServers(
 		}
 		servers = append(servers, boundServer{srv: srv, ln: ln})
 		log.Info("proxy configured",
-			zap.String("addr", srv.Addr),
-			zap.String("iface", iface.Name),
-			zap.String("private_ip", iface.PrivateIP))
+			slog.String("addr", srv.Addr),
+			slog.String("iface", iface.Name),
+			slog.String("private_ip", iface.PrivateIP))
 	}
 
 	lc.Append(fx.Hook{
 		OnStart: func(_ context.Context) error {
 			for _, b := range servers {
 				go func() {
-					log.Info("proxy listening", zap.String("addr", b.srv.Addr))
+					log.Info("proxy listening", slog.String("addr", b.srv.Addr))
 					if err := b.srv.Serve(b.ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 						log.Error("proxy server error",
-							zap.String("addr", b.srv.Addr), zap.Error(err))
+							slog.String("addr", b.srv.Addr), logger.Err(err))
 					}
 				}()
 			}
@@ -172,7 +173,7 @@ func StartProxyServers(
 				wg.Go(func() {
 					if err := b.srv.Shutdown(shutdownCtx); err != nil {
 						log.Debug("graceful shutdown timeout, forcing close",
-							zap.String("addr", b.srv.Addr), zap.Error(err))
+							slog.String("addr", b.srv.Addr), logger.Err(err))
 						_ = b.srv.Close()
 					}
 				})
@@ -185,7 +186,7 @@ func StartProxyServers(
 			// goroutines and lets the process exit promptly.
 			if tracker != nil {
 				if n := tracker.CloseAll(); n > 0 {
-					log.Info("forced close of active tunnels", zap.Int("count", n))
+					log.Info("forced close of active tunnels", slog.Int("count", n))
 				}
 			}
 			return nil

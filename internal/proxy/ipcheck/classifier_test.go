@@ -15,7 +15,6 @@ func TestClassifier_Classify(t *testing.T) {
 		[]string{"172.16.5.0/24"},    // Extra allow (override)
 		[]netip.Addr{localIP},        // Ahora es []netip.Addr
 	)
-
 	// Validamos que la inicialización no falle
 	if err != nil {
 		t.Fatalf("Fallo crítico al inicializar el Classifier: %v", err)

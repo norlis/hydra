@@ -2,11 +2,12 @@ package cluster
 
 import (
 	"encoding/json"
+	"log/slog"
 
 	"github.com/hashicorp/memberlist"
 	"github.com/norlis/hydra/internal/bus"
 	"github.com/norlis/hydra/internal/topology"
-	"go.uber.org/zap"
+	"github.com/norlis/hydra/pkg/logger"
 )
 
 // NodeDelegate listens to HashiCorp memberlist events and translates
@@ -15,7 +16,7 @@ type NodeDelegate struct {
 	eventBus bus.EventBus
 	// Returns the current local node snapshot (injected from MemberlistDiscovery).
 	getLocalNode func() topology.Node
-	log          *zap.Logger
+	log          *slog.Logger
 }
 
 // NodeMeta is invoked when memberlist needs to share this node's metadata.
@@ -25,16 +26,16 @@ func (d *NodeDelegate) NodeMeta(limit int) []byte {
 	node := d.getLocalNode()
 	raw, err := json.Marshal(node)
 	if err != nil {
-		d.log.Error("failed to serialize node", zap.Error(err))
+		d.log.Error("failed to serialize node", logger.Err(err))
 		return nil
 	}
 
 	data := encodeMeta(raw)
 	if len(data) > limit {
 		d.log.Warn("metadata too large even after compression",
-			zap.Int("raw", len(raw)),
-			zap.Int("compressed", len(data)),
-			zap.Int("limit", limit))
+			slog.Int("raw", len(raw)),
+			slog.Int("compressed", len(data)),
+			slog.Int("limit", limit))
 		return nil
 	}
 	return data
@@ -61,12 +62,12 @@ func (d *NodeDelegate) LocalState(join bool) []byte {
 func (d *NodeDelegate) MergeRemoteState(buf []byte, join bool) {
 	raw, err := decodeMeta(buf)
 	if err != nil {
-		d.log.Error("failed to decompress remote state", zap.Error(err))
+		d.log.Error("failed to decompress remote state", logger.Err(err))
 		return
 	}
 	var node topology.Node
 	if err := json.Unmarshal(raw, &node); err != nil {
-		d.log.Error("failed to deserialize remote state", zap.Error(err))
+		d.log.Error("failed to deserialize remote state", logger.Err(err))
 		return
 	}
 	// Hook to update a global node cache.
@@ -75,7 +76,7 @@ func (d *NodeDelegate) MergeRemoteState(buf []byte, join bool) {
 
 // NotifyJoin fires when a healthy node joins the network.
 func (d *NodeDelegate) NotifyJoin(node *memberlist.Node) {
-	d.log.Info("node joined the cluster", zap.String("node_id", node.Name), zap.String("address", node.Addr.String()))
+	d.log.Info("node joined the cluster", slog.String("node_id", node.Name), slog.String("address", node.Addr.String()))
 	d.eventBus.Publish(bus.ClusterEvent{
 		Type: bus.NodeJoined,
 		Node: decodeMember(node, d.log),
@@ -84,7 +85,7 @@ func (d *NodeDelegate) NotifyJoin(node *memberlist.Node) {
 
 // NotifyLeave fires when a node fails or gracefully leaves.
 func (d *NodeDelegate) NotifyLeave(node *memberlist.Node) {
-	d.log.Info("node left the cluster", zap.String("node_id", node.Name), zap.String("address", node.Addr.String()))
+	d.log.Info("node left the cluster", slog.String("node_id", node.Name), slog.String("address", node.Addr.String()))
 	d.eventBus.Publish(bus.ClusterEvent{
 		Type: bus.NodeLeft,
 		Node: decodeMember(node, d.log),
@@ -93,7 +94,7 @@ func (d *NodeDelegate) NotifyLeave(node *memberlist.Node) {
 
 // NotifyUpdate fires when a node's metadata changes at runtime.
 func (d *NodeDelegate) NotifyUpdate(node *memberlist.Node) {
-	d.log.Debug("node updated", zap.String("node_id", node.Name), zap.String("address", node.Addr.String()))
+	d.log.Debug("node updated", slog.String("node_id", node.Name), slog.String("address", node.Addr.String()))
 	d.eventBus.Publish(bus.ClusterEvent{
 		Type: bus.NodeUpdated,
 		Node: decodeMember(node, d.log),

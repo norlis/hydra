@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"log/slog"
 	"os"
 
 	hydra "github.com/norlis/hydra/internal"
@@ -14,8 +15,6 @@ import (
 	"github.com/norlis/hydra/pkg/logger"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 func main() {
@@ -24,11 +23,14 @@ func main() {
 		// the environment directly so Config can depend on it (Config's
 		// own LogLevel field is ignored here; we break what would be
 		// a Config↔Logger cycle by keeping the logger free of Config).
-		fx.Provide(func() *zap.Logger {
-			return logger.NewLogger(os.Getenv("LOG_LEVEL"))
+		fx.Provide(func() *slog.Logger {
+			return logger.New(os.Getenv("LOG_LEVEL"))
 		}),
-		fx.WithLogger(func(log *zap.Logger) fxevent.Logger {
-			return &fxevent.ZapLogger{Logger: log.WithOptions(zap.IncreaseLevel(zapcore.WarnLevel))}
+		fx.WithLogger(func() fxevent.Logger {
+			// fx lifecycle events are noisy at Info; cap them at the stricter
+			// of LOG_LEVEL and Warn (mirrors the previous zap IncreaseLevel).
+			lvl := max(logger.ParseLevel(os.Getenv("LOG_LEVEL")), slog.LevelWarn)
+			return &fxevent.SlogLogger{Logger: logger.NewWithLevel(lvl)}
 		}),
 
 		// Configuration + internal event bus.

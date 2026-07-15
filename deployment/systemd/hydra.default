@@ -1,0 +1,9 @@
+# /etc/default/hydra — Hydra overrides.
+# Edit here; this file survives package upgrades (nfpm conffile).
+# Uncomment and set values as needed, then: sudo systemctl restart hydra
+
+#BASE_PORT=3128
+#CONTROL_PORT=9192
+#LOG_LEVEL=info
+#HYDRA_GOSSIP_SEEDS=
+#HYDRA_PROXY_ALLOWED_PORTS=443,80

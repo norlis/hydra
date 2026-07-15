@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -14,7 +15,7 @@ import (
 	hydra "github.com/norlis/hydra/internal"
 	"github.com/norlis/hydra/internal/network"
 	"github.com/norlis/hydra/internal/topology"
-	"go.uber.org/zap"
+	"github.com/norlis/hydra/pkg/logger"
 )
 
 const (
@@ -26,11 +27,11 @@ const (
 // Satisfies network.Provider.
 type IMDSProvider struct {
 	basePort int
-	log      *zap.Logger
+	log      *slog.Logger
 	client   *http.Client
 }
 
-func NewIMDSProvider(cfg *hydra.Config, log *zap.Logger) *IMDSProvider {
+func NewIMDSProvider(cfg *hydra.Config, log *slog.Logger) *IMDSProvider {
 	return &IMDSProvider{
 		basePort: cfg.BasePort,
 		log:      log,
@@ -68,22 +69,22 @@ func (p *IMDSProvider) Discover() ([]topology.NetworkInterface, error) {
 		privateIP, err := p.imds(base+"/local-ipv4s", token)
 		if err != nil || privateIP == "" {
 			p.log.Warn("skipping interface: missing private IP",
-				zap.String("mac", mac), zap.Error(err))
+				slog.String("mac", mac), logger.Err(err))
 			continue
 		}
 
 		deviceNumStr, err := p.imds(base+"/device-number", token)
 		if err != nil {
 			p.log.Warn("skipping interface: failed to get device number",
-				zap.String("mac", mac), zap.Error(err))
+				slog.String("mac", mac), logger.Err(err))
 			continue
 		}
 		devNum, err := strconv.Atoi(strings.TrimSpace(deviceNumStr))
 		if err != nil {
 			p.log.Warn("skipping interface: malformed device number",
-				zap.String("mac", mac),
-				zap.String("value", deviceNumStr),
-				zap.Error(err))
+				slog.String("mac", mac),
+				slog.String("value", deviceNumStr),
+				logger.Err(err))
 			continue
 		}
 

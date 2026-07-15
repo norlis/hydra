@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -21,7 +22,7 @@ import (
 	"github.com/norlis/hydra/internal/proxy/limiter"
 	"github.com/norlis/hydra/internal/proxy/metrics"
 	"github.com/norlis/hydra/internal/topology"
-	"go.uber.org/zap"
+	"github.com/norlis/hydra/pkg/logger"
 )
 
 // HopHeader marks a request that has already been forwarded once by a
@@ -53,7 +54,7 @@ type DualForwarder struct {
 	tunnelLimit  *limiter.Tunnel
 	idleTimeout  time.Duration
 	metrics      *metrics.Metrics
-	log          *zap.Logger
+	log          *slog.Logger
 }
 
 // NewDualForwarder creates a forwarder pinned to iface. Every outbound
@@ -78,7 +79,7 @@ func NewDualForwarder(
 	tunnelLimit *limiter.Tunnel,
 	idleTimeout time.Duration,
 	mtr *metrics.Metrics,
-	log *zap.Logger,
+	log *slog.Logger,
 ) *DualForwarder {
 	local, _ := net.ResolveTCPAddr("tcp", iface.PrivateIP+":0")
 
@@ -121,7 +122,7 @@ func NewDualForwarder(
 		tunnelLimit:  tunnelLimit,
 		idleTimeout:  idleTimeout,
 		metrics:      mtr,
-		log:          log.With(zap.String("iface", iface.Name), zap.String("ip", iface.PrivateIP)),
+		log:          log.With(slog.String("iface", iface.Name), slog.String("ip", iface.PrivateIP)),
 	}
 }
 
@@ -160,7 +161,7 @@ func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if !f.portAllowed(r.Host) {
-		f.log.Warn("tunnel port denied", zap.String("target", r.Host))
+		f.log.Warn("tunnel port denied", slog.String("target", r.Host))
 		f.recordDeny(ctx, "port")
 		http.Error(w, "destination port not allowed", http.StatusForbidden)
 		return
@@ -185,12 +186,12 @@ func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 	rawRemote, err := f.dialer.DialContext(ctx, "tcp", r.Host)
 	if err != nil {
 		if ipcheck.IsDenied(err) {
-			f.log.Warn("tunnel ip denied", zap.String("target", r.Host), zap.Error(err))
+			f.log.Warn("tunnel ip denied", slog.String("target", r.Host), logger.Err(err))
 			f.recordDeny(ctx, "ip")
 			http.Error(w, "destination address not allowed", http.StatusForbidden)
 			return
 		}
-		f.log.Error("tunnel dial failed", zap.String("target", r.Host), zap.Error(err))
+		f.log.Error("tunnel dial failed", slog.String("target", r.Host), logger.Err(err))
 		f.recordError(ctx, "dial")
 		http.Error(w, "connection failed", http.StatusBadGateway)
 		return
@@ -208,7 +209,7 @@ func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 
 	client, clientBuf, err := hijackConn(w)
 	if err != nil {
-		f.log.Error("hijack failed", zap.Error(err))
+		f.log.Error("hijack failed", logger.Err(err))
 		f.recordError(ctx, "hijack")
 		http.Error(w, "hijack not supported", http.StatusInternalServerError)
 		return
@@ -259,13 +260,13 @@ func (f *DualForwarder) newInstrumented(c net.Conn, dstHost, peer string) net.Co
 		// Canonical decision log: one line per finished tunnel with
 		// every field needed for billing, audit, and debug.
 		f.log.Info("tunnel_done",
-			zap.String("event", "connect"),
-			zap.String("dst_host", dstHost),
-			zap.String("peer", peer),
-			zap.String("decision", decision),
-			zap.Int64("bytes_d2c", s.BytesIn),
-			zap.Int64("bytes_c2d", s.BytesOut),
-			zap.Duration("tunnel_duration", s.Duration),
+			slog.String("event", "connect"),
+			slog.String("dst_host", dstHost),
+			slog.String("peer", peer),
+			slog.String("decision", decision),
+			slog.Int64("bytes_d2c", s.BytesIn),
+			slog.Int64("bytes_c2d", s.BytesOut),
+			slog.Duration("tunnel_duration", s.Duration),
 		)
 	}
 	wrapped := conntrack.WrapWithIdle(c, f.idleTimeout, onClose)
@@ -324,11 +325,11 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 
 	rawRemote, err := f.peerDialer.DialContext(ctx, "tcp", peer)
 	if err != nil {
-		f.log.Warn("peer dial failed, falling back", zap.String("peer", peer), zap.Error(err))
+		f.log.Warn("peer dial failed, falling back", slog.String("peer", peer), logger.Err(err))
 		return false
 	}
 
-	fwd, err := http.NewRequestWithContext(ctx, http.MethodConnect, "http://"+r.Host, nil)
+	fwd, err := http.NewRequestWithContext(ctx, http.MethodConnect, "http://"+r.Host, http.NoBody)
 	if err != nil {
 		_ = rawRemote.Close()
 		return false
@@ -338,7 +339,7 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 
 	if err := fwd.Write(rawRemote); err != nil {
 		_ = rawRemote.Close()
-		f.log.Warn("peer write failed, falling back", zap.String("peer", peer), zap.Error(err))
+		f.log.Warn("peer write failed, falling back", slog.String("peer", peer), logger.Err(err))
 		return false
 	}
 
@@ -351,13 +352,13 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 	if err != nil {
 		_ = rawRemote.Close()
 		f.log.Warn("peer response failed, falling back",
-			zap.String("peer", peer), zap.Error(err))
+			slog.String("peer", peer), logger.Err(err))
 		return false
 	}
 	if status != http.StatusOK {
 		_ = rawRemote.Close()
 		f.log.Warn("peer rejected tunnel, falling back",
-			zap.String("peer", peer), zap.Int("status", status))
+			slog.String("peer", peer), slog.Int("status", status))
 		return false
 	}
 
@@ -371,7 +372,7 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 
 	client, clientBuf, err := hijackConn(w)
 	if err != nil {
-		f.log.Error("hijack failed", zap.Error(err))
+		f.log.Error("hijack failed", logger.Err(err))
 		f.recordError(ctx, "hijack")
 		return true
 	}
@@ -406,7 +407,7 @@ func (f *DualForwarder) httpExternal(w http.ResponseWriter, r *http.Request) {
 		},
 		Transport: f.transport,
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			f.log.Error("upstream error", zap.Error(err))
+			f.log.Error("upstream error", logger.Err(err))
 			http.Error(w, "upstream error", http.StatusBadGateway)
 		},
 	}
@@ -471,7 +472,7 @@ func (f *DualForwarder) portAllowed(hostPort string) bool {
 func (f *DualForwarder) httpViaPeer(w http.ResponseWriter, r *http.Request, peer string) {
 	conn, err := f.peerDialer.DialContext(r.Context(), "tcp", peer)
 	if err != nil {
-		f.log.Warn("peer dial failed", zap.String("peer", peer), zap.Error(err))
+		f.log.Warn("peer dial failed", slog.String("peer", peer), logger.Err(err))
 		http.Error(w, "peer unreachable", http.StatusBadGateway)
 		return
 	}
@@ -483,14 +484,14 @@ func (f *DualForwarder) httpViaPeer(w http.ResponseWriter, r *http.Request, peer
 	r.Header.Del("Proxy-Authorization")
 	r.Header.Set(HopHeader, "1")
 	if err := r.WriteProxy(conn); err != nil {
-		f.log.Warn("peer write failed", zap.String("peer", peer), zap.Error(err))
+		f.log.Warn("peer write failed", slog.String("peer", peer), logger.Err(err))
 		http.Error(w, "peer forward failed", http.StatusBadGateway)
 		return
 	}
 
 	resp, err := http.ReadResponse(bufio.NewReader(conn), r)
 	if err != nil {
-		f.log.Warn("peer response failed", zap.String("peer", peer), zap.Error(err))
+		f.log.Warn("peer response failed", slog.String("peer", peer), logger.Err(err))
 		http.Error(w, "peer forward failed", http.StatusBadGateway)
 		return
 	}
