@@ -114,6 +114,7 @@ func (m *MemberlistDiscovery) Start() error {
 	}
 
 	go m.autoJoinLoop()
+	go m.metaRefreshLoop()
 
 	return nil
 }
@@ -167,6 +168,29 @@ func (m *MemberlistDiscovery) autoJoinLoop() {
 			}
 			if _, err := m.list.Join(seeds); err != nil {
 				m.log.Debug("auto-join tick failed", hlogger.Err(err))
+			}
+		}
+	}
+}
+
+const metaRefreshInterval = 60 * time.Second
+
+// metaRefreshLoop periodically re-broadcasts this node's gossip metadata so
+// runtime interface changes (EIP rotation, ENI re-attach) reach peers and
+// /api/nodes without a restart. UpdateNode re-invokes NodeMeta, which reads
+// the network provider live. Unconditional refresh doubles as anti-entropy:
+// peers converge even if a previous update was lost.
+func (m *MemberlistDiscovery) metaRefreshLoop() {
+	ticker := time.NewTicker(metaRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			if err := m.list.UpdateNode(5 * time.Second); err != nil {
+				m.log.Warn("failed to re-broadcast node metadata", hlogger.Err(err))
 			}
 		}
 	}
