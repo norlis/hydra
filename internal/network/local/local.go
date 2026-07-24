@@ -55,7 +55,6 @@ func (p *Provider) Discover() ([]topology.NetworkInterface, error) {
 			PrivateIP:   privateIP,
 			SubnetCIDR:  subnetCIDR,
 			ServicePort: calculatedPort,
-			Reachable:   true,
 		})
 
 		validIndex++

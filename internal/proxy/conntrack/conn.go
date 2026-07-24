@@ -155,5 +155,5 @@ func (c *InstrumentedConn) touch() {
 // immediately. The error propagates through io.Copy in splice and
 // causes both halves of the tunnel to close.
 func (c *InstrumentedConn) expire() {
-	_ = c.Conn.SetDeadline(time.Now())
+	_ = c.SetDeadline(time.Now())
 }

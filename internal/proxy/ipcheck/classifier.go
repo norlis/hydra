@@ -167,7 +167,7 @@ func IsDenied(err error) bool {
 	return ok
 }
 
-// parsePrefixes convierte un slice de strings en formato CIDR a un slice de netip.Prefix
+// parsePrefixes convierte un slice de strings en formato CIDR a un slice de netip.Prefix.
 func parsePrefixes(cidrs []string) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(cidrs))
 	for _, c := range cidrs {

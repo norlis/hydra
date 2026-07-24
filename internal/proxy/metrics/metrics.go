@@ -85,28 +85,28 @@ func New(mp metric.MeterProvider) (*Metrics, error) {
 				"hydra.proxy.active_tunnels",
 				metric.WithDescription("Number of currently open CONNECT tunnels."),
 			)
-			return
+			return err
 		},
 		func() (err error) {
 			out.connectAttempts, err = m.Int64Counter(
 				"hydra.proxy.connect_attempts",
 				metric.WithDescription("CONNECT requests processed by outcome."),
 			)
-			return
+			return err
 		},
 		func() (err error) {
 			out.connectDenied, err = m.Int64Counter(
 				"hydra.proxy.connect_denied",
 				metric.WithDescription("CONNECT denials by reason."),
 			)
-			return
+			return err
 		},
 		func() (err error) {
 			out.connectErrors, err = m.Int64Counter(
 				"hydra.proxy.connect_errors",
 				metric.WithDescription("CONNECT failures by pipeline stage."),
 			)
-			return
+			return err
 		},
 		func() (err error) {
 			out.bytesTransferred, err = m.Int64Counter(
@@ -114,14 +114,14 @@ func New(mp metric.MeterProvider) (*Metrics, error) {
 				metric.WithDescription("Bytes piped through tunnels."),
 				metric.WithUnit("By"),
 			)
-			return
+			return err
 		},
 		func() (err error) {
 			out.requestsTotal, err = m.Int64Counter(
 				"hydra.proxy.requests",
 				metric.WithDescription("Proxy requests by method, status class and routing decision."),
 			)
-			return
+			return err
 		},
 		func() (err error) {
 			// Bucket boundaries are configured via SDK Views in
@@ -131,14 +131,14 @@ func New(mp metric.MeterProvider) (*Metrics, error) {
 				"hydra.proxy.connect_setup_seconds",
 				metric.WithDescription("Time from CONNECT received to 200 Established."),
 			)
-			return
+			return err
 		},
 		func() (err error) {
 			out.tunnelDuration, err = m.Float64Histogram(
 				"hydra.proxy.tunnel_seconds",
 				metric.WithDescription("Total CONNECT tunnel lifetime."),
 			)
-			return
+			return err
 		},
 	}
 	for _, b := range builders {

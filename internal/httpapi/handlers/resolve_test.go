@@ -131,7 +131,7 @@ func TestResolveTooManyIDsReturns400(t *testing.T) {
 	t.Parallel()
 	var b strings.Builder
 	b.WriteByte('[')
-	for i := 0; i < 10001; i++ {
+	for i := range 10001 {
 		if i > 0 {
 			b.WriteByte(',')
 		}

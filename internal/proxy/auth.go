@@ -3,6 +3,7 @@ package proxy
 import (
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -33,7 +34,7 @@ func WrapAuth(mode, user, pass string, next http.Handler) (http.Handler, error) 
 		return next, nil
 	case AuthModeBasic:
 		if user == "" || pass == "" {
-			return nil, fmt.Errorf("proxy: basic auth requires user and pass to be set")
+			return nil, errors.New("proxy: basic auth requires user and pass to be set")
 		}
 		return &basicAuth{
 			user:  user,

@@ -14,7 +14,8 @@ type NetworkInterface struct {
 	PublicIP    string `json:"public_ip,omitempty"`
 	SubnetCIDR  string `json:"subnet_cidr,omitempty"`
 	ServicePort int    `json:"service_port"`
-	Reachable   bool   `json:"reachable"`
+	Reachable   bool   `json:"reachable,omitempty"`
+	PhysicalID  string `json:"physical_id,omitempty"`
 }
 
 func (n *NetworkInterface) Address() string {

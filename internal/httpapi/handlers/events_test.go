@@ -18,7 +18,7 @@ func TestEventsHandshake(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/api/events", http.NoBody).WithContext(ctx)
 	rec := httptest.NewRecorder()
 
 	h.Events(rec, req)

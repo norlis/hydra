@@ -2,7 +2,7 @@ package ipcheck
 
 import "net/netip"
 
-// Usamos []netip.Prefix en lugar de []string
+// Usamos []netip.Prefix en lugar de []string.
 var builtInDeny = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),       // "this network"
 	netip.MustParsePrefix("127.0.0.0/8"),     // loopback

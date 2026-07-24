@@ -21,7 +21,7 @@ func TestErrorProblemJSON(t *testing.T) {
 	var logBuf bytes.Buffer
 	rd := newRender(&logBuf)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req := httptest.NewRequest(http.MethodGet, "/x", http.NoBody)
 
 	rd.Error(rec, req, errors.New("bad input"), presenter.WithStatus(http.StatusBadRequest))
 
@@ -38,7 +38,7 @@ func TestErrorLogsOnly5xx(t *testing.T) {
 	t.Parallel()
 	var logBuf bytes.Buffer
 	rd := newRender(&logBuf)
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req := httptest.NewRequest(http.MethodGet, "/x", http.NoBody)
 
 	rd.Error(httptest.NewRecorder(), req, errors.New("client"), presenter.WithStatus(http.StatusBadRequest))
 	if logBuf.Len() != 0 {
@@ -55,7 +55,7 @@ func TestJSON(t *testing.T) {
 	t.Parallel()
 	rd := New(slog.New(slog.DiscardHandler))
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req := httptest.NewRequest(http.MethodGet, "/x", http.NoBody)
 
 	rd.JSON(rec, req, map[string]string{"a": "b"})
 

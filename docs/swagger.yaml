@@ -1,0 +1,229 @@
+basePath: /
+definitions:
+  github_com_norlis_hydra_internal_topology.NetworkInterface:
+    properties:
+      mac:
+        type: string
+      name:
+        description: e.g. "eth0", "en0"
+        type: string
+      physical_id:
+        type: string
+      private_ip:
+        type: string
+      public_ip:
+        type: string
+      reachable:
+        type: boolean
+      service_port:
+        type: integer
+      subnet_cidr:
+        type: string
+    type: object
+  github_com_norlis_hydra_internal_topology.Node:
+    properties:
+      healthy:
+        type: boolean
+      id:
+        type: string
+      interfaces:
+        items:
+          $ref: '#/definitions/github_com_norlis_hydra_internal_topology.NetworkInterface'
+        type: array
+      labels:
+        additionalProperties:
+          type: string
+        description: |-
+          Labels allows injecting arbitrary metadata without changing the
+          struct (extensibility). E.g. {"provider": "aws", "role": "edge-proxy"}.
+        type: object
+      last_seen:
+        type: string
+      started_at:
+        type: string
+      zone:
+        description: e.g. "us-east-1", "datacenter-south", "rack-4"
+        type: string
+    type: object
+  internal_httpapi_handlers.ProxyInfo:
+    properties:
+      address:
+        type: string
+      node_id:
+        type: string
+    type: object
+  internal_httpapi_handlers.resolvedNode:
+    properties:
+      address:
+        type: string
+      node_id:
+        type: string
+    type: object
+  problem.Detail:
+    properties:
+      detail:
+        description: Detail is a human-readable explanation specific to this occurrence.
+        type: string
+      instance:
+        description: Instance is a URI identifying the specific occurrence of the
+          problem.
+        type: string
+      requestId:
+        description: RequestID correlates the problem to a specific request.
+        type: string
+      status:
+        description: Status is the HTTP status code for this occurrence.
+        type: integer
+      timestamp:
+        description: Timestamp records when the problem was created.
+        type: string
+      title:
+        description: |-
+          Title is a short, human-readable summary of the problem type.
+          Should not change across occurrences of the same problem.
+        type: string
+      type:
+        description: |-
+          Type is a URI identifying the problem type. Should provide
+          developer-readable documentation.
+        type: string
+    type: object
+info:
+  contact:
+    email: norlis.viamonte@gmail.com
+    name: Norlis Viamonte
+    url: http://www.example.com/support
+  description: Esta es una API generada automáticamente con Swaggo.
+  termsOfService: http://swagger.io/terms/
+  title: hydra
+  version: "1.0"
+paths:
+  /api/events:
+    get:
+      description: Real-time stream of cluster membership events (node.joined, node.left,
+        node.updated) via Server-Sent Events.
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of events
+          schema:
+            type: string
+        "500":
+          description: Streaming unsupported
+          schema:
+            type: string
+      summary: SSE Cluster Events
+      tags:
+      - topology
+  /api/nodes:
+    get:
+      consumes:
+      - application/json
+      description: list of cluster nodes (local + active peers)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_norlis_hydra_internal_topology.Node'
+            type: array
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/problem.Detail'
+      summary: Nodes
+      tags:
+      - topology
+  /api/proxies:
+    get:
+      consumes:
+      - application/json
+      description: list of all proxy addresses in the cluster
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_httpapi_handlers.ProxyInfo'
+            type: array
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/problem.Detail'
+      summary: Proxies
+      tags:
+      - topology
+  /api/proxies/test:
+    get:
+      description: |-
+        Checks if a proxy address is operational by routing a request through it.
+        The target defaults to https://checkip.amazonaws.com (returns the egress IP).
+        Note: requires outbound internet access; will fail in air-gapped networks.
+      parameters:
+      - description: Proxy address (host:port, e.g. 192.168.1.10:3128)
+        in: query
+        name: address
+        required: true
+        type: string
+      - description: 'Target URL to fetch through the proxy (default: https://checkip.amazonaws.com/)'
+        in: query
+        name: target
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Test a proxy
+      tags:
+      - topology
+  /api/resolve:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Maps each entity id to the node that owns it on the consistent-hash ring.
+        Input is a JSON array of strings; empty and duplicate ids are dropped.
+        Values are hashed verbatim (no trim/lowercase) to match live routing.
+      parameters:
+      - description: Entity ids to resolve
+        in: body
+        name: ids
+        required: true
+        schema:
+          items:
+            type: string
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_httpapi_handlers.resolvedNode'
+            type: object
+        "400":
+          description: Invalid body or too many ids
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Ring not converged
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Resolve entity ids to nodes
+      tags:
+      - topology
+swagger: "2.0"

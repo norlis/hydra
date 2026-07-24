@@ -1,0 +1,322 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Esta es una API generada automáticamente con Swaggo.",
+        "title": "hydra",
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {
+            "name": "Norlis Viamonte",
+            "url": "http://www.example.com/support",
+            "email": "norlis.viamonte@gmail.com"
+        },
+        "version": "1.0"
+    },
+    "basePath": "/",
+    "paths": {
+        "/api/events": {
+            "get": {
+                "description": "Real-time stream of cluster membership events (node.joined, node.left, node.updated) via Server-Sent Events.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "topology"
+                ],
+                "summary": "SSE Cluster Events",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of events",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Streaming unsupported",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/nodes": {
+            "get": {
+                "description": "list of cluster nodes (local + active peers)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "topology"
+                ],
+                "summary": "Nodes",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_norlis_hydra_internal_topology.Node"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/problem.Detail"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/proxies": {
+            "get": {
+                "description": "list of all proxy addresses in the cluster",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "topology"
+                ],
+                "summary": "Proxies",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_httpapi_handlers.ProxyInfo"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/problem.Detail"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/proxies/test": {
+            "get": {
+                "description": "Checks if a proxy address is operational by routing a request through it.\nThe target defaults to https://checkip.amazonaws.com (returns the egress IP).\nNote: requires outbound internet access; will fail in air-gapped networks.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "topology"
+                ],
+                "summary": "Test a proxy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proxy address (host:port, e.g. 192.168.1.10:3128)",
+                        "name": "address",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target URL to fetch through the proxy (default: https://checkip.amazonaws.com/)",
+                        "name": "target",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/resolve": {
+            "post": {
+                "description": "Maps each entity id to the node that owns it on the consistent-hash ring.\nInput is a JSON array of strings; empty and duplicate ids are dropped.\nValues are hashed verbatim (no trim/lowercase) to match live routing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "topology"
+                ],
+                "summary": "Resolve entity ids to nodes",
+                "parameters": [
+                    {
+                        "description": "Entity ids to resolve",
+                        "name": "ids",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_httpapi_handlers.resolvedNode"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid body or too many ids",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Ring not converged",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "github_com_norlis_hydra_internal_topology.NetworkInterface": {
+            "type": "object",
+            "properties": {
+                "mac": {
+                    "type": "string"
+                },
+                "name": {
+                    "description": "e.g. \"eth0\", \"en0\"",
+                    "type": "string"
+                },
+                "physical_id": {
+                    "type": "string"
+                },
+                "private_ip": {
+                    "type": "string"
+                },
+                "public_ip": {
+                    "type": "string"
+                },
+                "reachable": {
+                    "type": "boolean"
+                },
+                "service_port": {
+                    "type": "integer"
+                },
+                "subnet_cidr": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_norlis_hydra_internal_topology.Node": {
+            "type": "object",
+            "properties": {
+                "healthy": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "interfaces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_norlis_hydra_internal_topology.NetworkInterface"
+                    }
+                },
+                "labels": {
+                    "description": "Labels allows injecting arbitrary metadata without changing the\nstruct (extensibility). E.g. {\"provider\": \"aws\", \"role\": \"edge-proxy\"}.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "last_seen": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "zone": {
+                    "description": "e.g. \"us-east-1\", \"datacenter-south\", \"rack-4\"",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_httpapi_handlers.ProxyInfo": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_httpapi_handlers.resolvedNode": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "problem.Detail": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "description": "Detail is a human-readable explanation specific to this occurrence.",
+                    "type": "string"
+                },
+                "instance": {
+                    "description": "Instance is a URI identifying the specific occurrence of the problem.",
+                    "type": "string"
+                },
+                "requestId": {
+                    "description": "RequestID correlates the problem to a specific request.",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Status is the HTTP status code for this occurrence.",
+                    "type": "integer"
+                },
+                "timestamp": {
+                    "description": "Timestamp records when the problem was created.",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "Title is a short, human-readable summary of the problem type.\nShould not change across occurrences of the same problem.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is a URI identifying the problem type. Should provide\ndeveloper-readable documentation.",
+                    "type": "string"
+                }
+            }
+        }
+    }
+}
