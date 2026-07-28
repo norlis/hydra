@@ -249,6 +249,12 @@ func encodeMeta(raw []byte) []byte {
 	return buf.Bytes()
 }
 
+// decodeMetaMaxBytes caps the decompressed size of gossiped metadata.
+// Legitimate payloads are a few KB of JSON; the cap stops zlib bombs
+// from a malicious cluster member (~1000:1 expansion). A truncated
+// payload fails JSON decoding downstream and falls back to a stub.
+const decodeMetaMaxBytes = 1 << 20 // 1 MiB
+
 // decodeMeta reverses encodeMeta. Returns an error if the payload is
 // not a valid zlib stream.
 func decodeMeta(meta []byte) ([]byte, error) {
@@ -257,7 +263,7 @@ func decodeMeta(meta []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Close()
-	return io.ReadAll(r)
+	return io.ReadAll(io.LimitReader(r, decodeMetaMaxBytes))
 }
 
 // GetLocalNode returns this instance's topology view.

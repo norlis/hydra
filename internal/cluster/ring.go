@@ -8,7 +8,6 @@ import (
 	hydra "github.com/norlis/hydra/internal"
 	"github.com/norlis/hydra/internal/bus"
 	"github.com/norlis/hydra/internal/hash"
-	"github.com/norlis/hydra/internal/topology"
 )
 
 // Endpoint is the resolved target returned by the ring for a given
@@ -124,19 +123,4 @@ func (r *Ring) Len() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.nodes)
-}
-
-// proxyAddr derives the canonical proxy address from a node: the
-// PrivateIP + ServicePort of its first interface. Returns empty if
-// the node has no usable interface yet (e.g. a stub published before
-// its NodeMeta arrived).
-func proxyAddr(n topology.Node) string {
-	if len(n.Interfaces) == 0 {
-		return ""
-	}
-	i := n.Interfaces[0]
-	if i.PrivateIP == "" || i.ServicePort == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%s:%d", i.PrivateIP, i.ServicePort)
 }
