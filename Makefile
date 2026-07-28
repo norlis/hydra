@@ -4,7 +4,7 @@ APP_IMPORT_PATH := $(shell go list -m)
 ALL_PKGS := $(sort $(shell go list ./...))
 
 # Variables para inyectar en el build
-GIT_SHA := $(shell git rev-parse --short HEAD)
+GIT_SHA := $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)
 
 DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 

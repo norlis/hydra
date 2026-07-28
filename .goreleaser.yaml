@@ -16,7 +16,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/norlis/hydra/internal/version.GitHash={{.ShortCommit}}
+      - -X github.com/norlis/hydra/internal/version.GitHash={{.Tag}}
       - -X github.com/norlis/hydra/internal/version.Date={{.CommitDate}}
 
 nfpms:
