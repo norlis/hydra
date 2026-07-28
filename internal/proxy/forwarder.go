@@ -188,7 +188,7 @@ func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 		if ipcheck.IsDenied(err) {
 			f.log.Warn("tunnel ip denied", slog.String("target", r.Host), logger.Err(err))
 			f.recordDeny(ctx, "ip")
-			http.Error(w, "destination address not allowed", http.StatusForbidden)
+			http.Error(w, denyBody(r.Host, err), http.StatusForbidden)
 			return
 		}
 		f.log.Error("tunnel dial failed", slog.String("target", r.Host), logger.Err(err))
@@ -294,6 +294,27 @@ func (f *DualForwarder) acquireTunnelSlot(ctx context.Context, w http.ResponseWr
 // recordDeny / recordError are thin wrappers around the metrics facade
 // kept for readability at call sites. The facade is itself nil-safe,
 // so no extra guard is needed here.
+// hostOnly returns the host without its port, if present.
+func hostOnly(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return h
+	}
+	return hostport
+}
+
+// denyBody renders the client-facing 403 body for an egress policy denial,
+// in the style of a forward-proxy deny notice. The resolved IP and granular
+// reason stay in the logs; the client sees only the requested host and the
+// rule category, so the proxy does not leak internal DNS resolution.
+func denyBody(host string, err error) string {
+	rule := "default deny policy"
+	var de *ipcheck.DeniedError
+	if errors.As(err, &de) && de.Reason == ipcheck.DenyConfigured {
+		rule = "configured deny rule"
+	}
+	return fmt.Sprintf("Egress proxying is denied to host '%s': %s.", hostOnly(host), rule)
+}
+
 func (f *DualForwarder) recordDeny(ctx context.Context, reason string) {
 	f.metrics.RecordDenied(ctx, reason)
 }
@@ -406,8 +427,15 @@ func (f *DualForwarder) httpExternal(w http.ResponseWriter, r *http.Request) {
 			f.stripControlHeaders(req)
 		},
 		Transport: f.transport,
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+		ErrorHandler: func(w http.ResponseWriter, req *http.Request, err error) {
+			if ipcheck.IsDenied(err) {
+				f.log.Warn("http ip denied", slog.String("target", req.Host), logger.Err(err))
+				f.recordDeny(req.Context(), "ip")
+				http.Error(w, denyBody(req.Host, err), http.StatusForbidden)
+				return
+			}
 			f.log.Error("upstream error", logger.Err(err))
+			f.recordError(req.Context(), "upstream")
 			http.Error(w, "upstream error", http.StatusBadGateway)
 		},
 	}
