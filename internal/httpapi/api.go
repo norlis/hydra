@@ -43,7 +43,7 @@ func NewHttpApi(params Params) {
 			middleware.WithMessage(http.StatusMethodNotAllowed, "method is not allowed for this resource."),
 		),
 		middleware.Recover(params.Logger),
-		middleware.RequestLogger(params.Logger, middleware.WithSkipPaths("/health", "/live")),
+		middleware.RequestLogger(params.Logger, middleware.WithSkipPaths("/health", "/live", "/ready")),
 		middleware.AllowAll(),
 	}
 
