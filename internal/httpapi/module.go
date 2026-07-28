@@ -34,8 +34,9 @@ import (
 const proxyControlMaxHeaderBytes = 16 << 10
 
 // Module wires the control-plane HTTP server. It also acts as the
-// admin endpoint host so /healthz and /debug/pprof share the listener
-// with the API (separate from the proxy data plane).
+// admin endpoint host so /debug/pprof shares the listener with the API
+// (the /live, /ready and /health endpoints are registered in NewHttpApi;
+// separate from the proxy data plane).
 //
 // Telemetry is push-based: the OTel MeterProvider exports OTLP/HTTP to
 // an OpenTelemetry Collector at infrastructure level. There is no
@@ -162,9 +163,9 @@ func NewMeterProvider(lc fx.Lifecycle, cfg *hydra.Config, log *slog.Logger) (met
 	return provider, nil
 }
 
-// MountAdminEndpoints registers /healthz and /debug/pprof/* on the
-// control-plane mux. Metrics exposition is push-only (OTLP) and lives
-// outside this binary; nothing serves /metrics here.
+// MountAdminEndpoints registers /debug/pprof/* on the control-plane mux.
+// Metrics exposition is push-only (OTLP) and lives outside this binary;
+// nothing serves /metrics here.
 func MountAdminEndpoints(mux *http.ServeMux) {
 	// pprof endpoints. Net/http/pprof registers on http.DefaultServeMux
 	// when imported as a side-effect; we wire each handler explicitly

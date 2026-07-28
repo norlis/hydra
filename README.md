@@ -259,8 +259,13 @@ The control-plane listens on `CONTROL_PORT` (default `9192`):
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/nodes` | Returns the local node + every peer known to memberlist. Each node carries its full `topology.Node` (interfaces, MAC, ports, last-seen, health) decoded from the peer's gossiped `NodeMeta`. |
-| `GET` | `/healthz` | Liveness probe. Returns `200 ok` while the process is running. |
+| `GET` | `/api/nodes` | Local node + every peer known to memberlist. Each node carries its `topology.Node` (interfaces, MAC, `physical_id`/ENI, ports, last-seen, health, version) decoded from the peer's gossiped `NodeMeta`. |
+| `POST` | `/api/resolve` | Resolves which node owns a given `entityID` on the consistent-hash ring. |
+| `GET` | `/api/events` | Server-Sent Events stream of cluster events (node join/leave/update). |
+| `GET` | `/live` | Liveness. Returns `{uptime, hostname, version}` while the process is running. |
+| `GET` | `/ready` | Readiness, gated by drain state. Returns `503` while draining before shutdown so load balancers stop routing. |
+| `GET` | `/health` | Node health probe: the local node reports healthy with at least one bound interface. |
+| `GET` | `/events`, `/assets/` | Minimal web UI: cluster-events page plus its static assets. |
 | `*` | `/debug/pprof/*` | Standard `net/http/pprof` handlers (`profile`, `heap`, `goroutine`, `trace`, …). Bind the control port to a private interface or fence with a security group — pprof exposes process internals. |
 
 The forward proxy data-plane listens on `BASE_PORT` (+1 per extra NIC). It accepts standard HTTP forward-proxy and CONNECT requests, honoring these request headers:
