@@ -17,6 +17,7 @@ import (
 	"github.com/norlis/hydra/internal/bus"
 	"github.com/norlis/hydra/internal/network"
 	"github.com/norlis/hydra/internal/topology"
+	"github.com/norlis/hydra/internal/version"
 	hlogger "github.com/norlis/hydra/pkg/logger"
 )
 
@@ -271,7 +272,7 @@ func (m *MemberlistDiscovery) GetLocalNode() topology.Node {
 	interfaces, err := m.netProvider.Discover()
 	if err != nil {
 		m.log.Error("failed to discover local interfaces", hlogger.Err(err))
-		return topology.Node{ID: m.cfg.GossIPNodeName}
+		return topology.Node{ID: m.cfg.GossIPNodeName, Version: version.GitHash}
 	}
 	return topology.Node{
 		ID:         m.cfg.GossIPNodeName,
@@ -279,6 +280,7 @@ func (m *MemberlistDiscovery) GetLocalNode() topology.Node {
 		Healthy:    true,
 		LastSeen:   time.Now(),
 		StartedAt:  m.startedAt,
+		Version:    version.GitHash,
 	}
 }
 

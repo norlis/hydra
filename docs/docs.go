@@ -264,6 +264,10 @@ const docTemplate = `{
                 "started_at": {
                     "type": "string"
                 },
+                "version": {
+                    "description": "binary version (git tag or short commit), injected at build time",
+                    "type": "string"
+                },
                 "zone": {
                     "description": "e.g. \"us-east-1\", \"datacenter-south\", \"rack-4\"",
                     "type": "string"

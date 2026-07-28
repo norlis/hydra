@@ -30,6 +30,7 @@ type Node struct {
 	LastSeen   time.Time          `json:"last_seen"`
 	StartedAt  *time.Time         `json:"started_at,omitempty"`
 	Healthy    bool               `json:"healthy"`
+	Version    string             `json:"version,omitempty"` // binary version (git tag or short commit), injected at build time
 
 	// Labels allows injecting arbitrary metadata without changing the
 	// struct (extensibility). E.g. {"provider": "aws", "role": "edge-proxy"}.
