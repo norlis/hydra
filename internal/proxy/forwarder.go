@@ -286,7 +286,7 @@ func (f *DualForwarder) newInstrumented(c net.Conn, dstHost, peer string, log *s
 		// every field needed for billing, audit, and debug.
 		log.Info("tunnel_done",
 			slog.String("event", "connect"),
-			slog.String("dst_host", dstHost),
+			slog.String("host", dstHost),
 			slog.String("peer", peer),
 			slog.String("decision", decision),
 			slog.Int64("bytes_d2c", s.BytesIn),
