@@ -1,9 +1,21 @@
 package ipcheck
 
 import (
+	"errors"
 	"net/netip"
 	"testing"
 )
+
+func TestReason(t *testing.T) {
+	t.Parallel()
+	de := &DeniedError{IP: netip.MustParseAddr("169.254.169.254"), Reason: DenyLinkLocal}
+	if got := Reason(de); got != "link_local" {
+		t.Errorf("Reason(DeniedError) = %q, want link_local", got)
+	}
+	if got := Reason(errors.New("x")); got != "" {
+		t.Errorf("Reason(plain) = %q, want empty", got)
+	}
+}
 
 func TestClassifier_Classify(t *testing.T) {
 	_ = t.Context()

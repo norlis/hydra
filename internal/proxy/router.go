@@ -52,9 +52,14 @@ func NewRouter(
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// One correlation id per request, threaded via context so the forwarder's
+	// per-request logs join the router's under the same request_id.
+	req = req.WithContext(contextWithRequestID(req.Context(), newRequestID()))
+	rlog := reqLog(r.log, req.Context())
+
 	peer := r.peerFor(req)
 	decision := r.decisionFor(req, peer)
-	r.logDecision(req, peer, decision)
+	r.logDecision(rlog, req, peer, decision)
 
 	// CONNECT is hijacked by the forwarder; instrumentation lives in
 	// tunnelExternal/tunnelViaPeer (connect_attempts_total + canonical
@@ -73,7 +78,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Canonical decision log per finished HTTP request. Mirror of
 	// tunnel_done in forwarder.go: one structured line containing every
 	// field needed for post-mortem and audit.
-	r.log.Info("http_done",
+	rlog.Info("http_done",
 		slog.String("event", "http"),
 		slog.String("method", req.Method),
 		slog.String("host", req.Host),
@@ -113,8 +118,8 @@ func (r *Router) decisionFor(req *http.Request, peer string) string {
 //	peer       -> relayed to another node (peer address in "peer" field)
 //	hop-local  -> already forwarded once (HopHeader set), kept local to
 //	              avoid ping-pong loops during ring convergence
-func (r *Router) logDecision(req *http.Request, peer, decision string) {
-	r.log.Info("proxy request",
+func (r *Router) logDecision(l *slog.Logger, req *http.Request, peer, decision string) {
+	l.Info("proxy request",
 		slog.String("method", req.Method),
 		slog.String("host", req.Host),
 		slog.String("entity_id", req.Header.Get(EntityHeader)),

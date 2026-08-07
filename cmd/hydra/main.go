@@ -12,6 +12,7 @@ import (
 	"github.com/norlis/hydra/internal/httpapi"
 	"github.com/norlis/hydra/internal/network"
 	"github.com/norlis/hydra/internal/proxy"
+	"github.com/norlis/hydra/internal/version"
 	"github.com/norlis/hydra/pkg/logger"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
@@ -24,7 +25,14 @@ func main() {
 		// own LogLevel field is ignored here; we break what would be
 		// a Config↔Logger cycle by keeping the logger free of Config).
 		fx.Provide(func() *slog.Logger {
-			return logger.New(os.Getenv("LOG_LEVEL"))
+			// Identity tags on every record: unified service tagging for
+			// Datadog and per-version/env aggregation in CloudWatch. Sourced
+			// without Config to preserve the Config↔Logger cycle break.
+			return logger.New(os.Getenv("LOG_LEVEL")).With(
+				slog.String("service", "hydra"),
+				slog.String("version", version.GitHash),
+				slog.String("env", os.Getenv("ENVIRONMENT")),
+			)
 		}),
 		fx.WithLogger(func() fxevent.Logger {
 			// fx lifecycle events are noisy at Info; cap them at the stricter

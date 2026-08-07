@@ -8,8 +8,13 @@ import (
 	"github.com/norlis/httpgate/middleware"
 	"github.com/norlis/hydra/internal/cluster"
 	"github.com/norlis/hydra/internal/httpapi/handlers"
+	"github.com/norlis/hydra/pkg/logger"
 	"go.uber.org/fx"
 )
+
+// logComponent tags every control-plane log record so it can be filtered
+// apart from the data plane (see pkg/logger.WithComponent).
+const logComponent = "control"
 
 type Params struct {
 	fx.In
@@ -35,15 +40,16 @@ type Params struct {
 // @BasePath  /
 // @openapi 3.0.0.
 func NewHttpApi(params Params) {
+	log := logger.WithComponent(params.Logger, logComponent)
 	base := []middleware.Middleware{
-		middleware.TraceID(middleware.WithHeaderName("x-request-id"), middleware.WithLogger(params.Logger)),
+		middleware.TraceID(middleware.WithHeaderName("x-request-id"), middleware.WithLogger(log)),
 		middleware.InterceptStatus(
 			middleware.WithIntercept(http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError),
 			middleware.WithMessage(http.StatusNotFound, "resource not found"),
 			middleware.WithMessage(http.StatusMethodNotAllowed, "method is not allowed for this resource."),
 		),
-		middleware.Recover(params.Logger),
-		middleware.RequestLogger(params.Logger, middleware.WithSkipPaths("/health", "/live", "/ready")),
+		middleware.Recover(log),
+		middleware.RequestLogger(log, middleware.WithSkipPaths("/health", "/live", "/ready")),
 		middleware.AllowAll(),
 	}
 

@@ -188,6 +188,7 @@ func NewReadinessGate(checker *cluster.NodeReadinessChecker) *health.Readiness {
 }
 
 func NewHttpServerMux(lc fx.Lifecycle, cfg *hydra.Config, ready *health.Readiness, log *slog.Logger) *http.ServeMux {
+	log = hlogger.WithComponent(log, logComponent)
 	mux := http.NewServeMux()
 	listener := net.JoinHostPort("0.0.0.0", cfg.ControlPort)
 

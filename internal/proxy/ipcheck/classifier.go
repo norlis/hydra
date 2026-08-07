@@ -167,6 +167,15 @@ func IsDenied(err error) bool {
 	return ok
 }
 
+// Reason returns the deny reason string when err is a policy denial from this
+// classifier, or "" otherwise. Feeds the deny_reason log field.
+func Reason(err error) string {
+	if de, ok := errors.AsType[*DeniedError](err); ok {
+		return de.Reason.String()
+	}
+	return ""
+}
+
 // parsePrefixes convierte un slice de strings en formato CIDR a un slice de netip.Prefix.
 func parsePrefixes(cidrs []string) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(cidrs))

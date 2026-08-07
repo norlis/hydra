@@ -40,6 +40,20 @@ const HopHeader = "X-Hydra-Hop"
 // tunnel bytes as a chunked body.
 var connectEstablished = []byte("HTTP/1.1 200 Connection established\r\n\r\n")
 
+// Structured failure fields for log-based failure analysis
+// (stats count() by host, error_source, deny_reason).
+const (
+	keyErrorSource = "error_source"
+	keyDenyReason  = "deny_reason"
+
+	errSourcePolicy   = "policy"   // request refused by proxy policy
+	errSourceUpstream = "upstream" // origin unreachable or errored
+	errSourceProxy    = "proxy"    // internal proxy fault
+
+	denyReasonPort = "port_not_allowed"
+	denyReasonAuth = "auth_required"
+)
+
 // DualForwarder implements Forwarder for both HTTP and CONNECT methods,
 // binding every outbound TCP socket to a specific local interface.
 type DualForwarder struct {
@@ -159,9 +173,13 @@ func (f *DualForwarder) ForwardToPeer(peer string, w http.ResponseWriter, r *htt
 func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 	setupStart := time.Now()
 	ctx := r.Context()
+	log := reqLog(f.log, ctx)
 
 	if !f.portAllowed(r.Host) {
-		f.log.Warn("tunnel port denied", slog.String("target", r.Host))
+		log.Warn("tunnel port denied",
+			slog.String("host", r.Host),
+			slog.String(keyErrorSource, errSourcePolicy),
+			slog.String(keyDenyReason, denyReasonPort))
 		f.recordDeny(ctx, "port")
 		http.Error(w, "destination port not allowed", http.StatusForbidden)
 		return
@@ -186,12 +204,19 @@ func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 	rawRemote, err := f.dialer.DialContext(ctx, "tcp", r.Host)
 	if err != nil {
 		if ipcheck.IsDenied(err) {
-			f.log.Warn("tunnel ip denied", slog.String("target", r.Host), logger.Err(err))
+			log.Warn("tunnel ip denied",
+				slog.String("host", r.Host),
+				slog.String(keyErrorSource, errSourcePolicy),
+				slog.String(keyDenyReason, ipcheck.Reason(err)),
+				logger.Err(err))
 			f.recordDeny(ctx, "ip")
 			http.Error(w, denyBody(r.Host, err), http.StatusForbidden)
 			return
 		}
-		f.log.Error("tunnel dial failed", slog.String("target", r.Host), logger.Err(err))
+		log.Error("tunnel dial failed",
+			slog.String("host", r.Host),
+			slog.String(keyErrorSource, errSourceUpstream),
+			logger.Err(err))
 		f.recordError(ctx, "dial")
 		http.Error(w, "connection failed", http.StatusBadGateway)
 		return
@@ -200,7 +225,7 @@ func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 	// Wrap the remote conn with instrumentation BEFORE hijacking the
 	// client, so byte counters and lifetime are attributed to this
 	// tunnel from the moment the upstream socket exists.
-	remote := f.newInstrumented(rawRemote, r.Host, "")
+	remote := f.newInstrumented(rawRemote, r.Host, "", log)
 	// Past this point, the tunnel-slot release lives in the
 	// InstrumentedConn's close callback. Suppress the function-level
 	// release so we don't double-decrement.
@@ -209,7 +234,7 @@ func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 
 	client, clientBuf, err := hijackConn(w)
 	if err != nil {
-		f.log.Error("hijack failed", logger.Err(err))
+		log.Error("hijack failed", slog.String(keyErrorSource, errSourceProxy), logger.Err(err))
 		f.recordError(ctx, "hijack")
 		http.Error(w, "hijack not supported", http.StatusInternalServerError)
 		return
@@ -237,7 +262,7 @@ func (f *DualForwarder) tunnelExternal(w http.ResponseWriter, r *http.Request) {
 // The close callback also releases the tunnel-limit slot acquired
 // before the dial — keeping that release here means it fires exactly
 // once per tunnel even if the caller forgets to defer it.
-func (f *DualForwarder) newInstrumented(c net.Conn, dstHost, peer string) net.Conn {
+func (f *DualForwarder) newInstrumented(c net.Conn, dstHost, peer string, log *slog.Logger) net.Conn {
 	// If nothing observes the conn, skip the wrapper — but only when
 	// no idle watchdog is configured either, since the watchdog itself
 	// is implemented inside InstrumentedConn.
@@ -259,7 +284,7 @@ func (f *DualForwarder) newInstrumented(c net.Conn, dstHost, peer string) net.Co
 		}
 		// Canonical decision log: one line per finished tunnel with
 		// every field needed for billing, audit, and debug.
-		f.log.Info("tunnel_done",
+		log.Info("tunnel_done",
 			slog.String("event", "connect"),
 			slog.String("dst_host", dstHost),
 			slog.String("peer", peer),
@@ -331,6 +356,7 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 	setupStart := time.Now()
 
 	ctx := r.Context()
+	log := reqLog(f.log, ctx)
 
 	// Same admission control as the direct branch. Acquired here so a
 	// fully-loaded node short-circuits before any peer I/O.
@@ -346,7 +372,7 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 
 	rawRemote, err := f.peerDialer.DialContext(ctx, "tcp", peer)
 	if err != nil {
-		f.log.Warn("peer dial failed, falling back", slog.String("peer", peer), logger.Err(err))
+		log.Warn("peer dial failed, falling back", slog.String("peer", peer), logger.Err(err))
 		return false
 	}
 
@@ -360,7 +386,7 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 
 	if err := fwd.Write(rawRemote); err != nil {
 		_ = rawRemote.Close()
-		f.log.Warn("peer write failed, falling back", slog.String("peer", peer), logger.Err(err))
+		log.Warn("peer write failed, falling back", slog.String("peer", peer), logger.Err(err))
 		return false
 	}
 
@@ -372,13 +398,13 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 	status, err := readConnectStatus(remoteBuf)
 	if err != nil {
 		_ = rawRemote.Close()
-		f.log.Warn("peer response failed, falling back",
+		log.Warn("peer response failed, falling back",
 			slog.String("peer", peer), logger.Err(err))
 		return false
 	}
 	if status != http.StatusOK {
 		_ = rawRemote.Close()
-		f.log.Warn("peer rejected tunnel, falling back",
+		log.Warn("peer rejected tunnel, falling back",
 			slog.String("peer", peer), slog.Int("status", status))
 		return false
 	}
@@ -386,14 +412,14 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 	// From here on we're committed: wrap the peer conn for tracking
 	// before any client-visible side effect, so active_tunnels and
 	// bytes_total stay accurate even if the hijack below fails.
-	remote := f.newInstrumented(rawRemote, r.Host, peer)
+	remote := f.newInstrumented(rawRemote, r.Host, peer, log)
 	// Slot release moves to the InstrumentedConn close callback.
 	releaseSlot = false
 	defer func() { _ = remote.Close() }()
 
 	client, clientBuf, err := hijackConn(w)
 	if err != nil {
-		f.log.Error("hijack failed", logger.Err(err))
+		log.Error("hijack failed", slog.String(keyErrorSource, errSourceProxy), logger.Err(err))
 		f.recordError(ctx, "hijack")
 		return true
 	}
@@ -416,6 +442,7 @@ func (f *DualForwarder) tunnelViaPeer(w http.ResponseWriter, r *http.Request, pe
 // -- HTTP handling ----------------------------------------------------
 
 func (f *DualForwarder) httpExternal(w http.ResponseWriter, r *http.Request) {
+	log := reqLog(f.log, r.Context())
 	rp := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			if req.URL.Host == "" {
@@ -429,12 +456,19 @@ func (f *DualForwarder) httpExternal(w http.ResponseWriter, r *http.Request) {
 		Transport: f.transport,
 		ErrorHandler: func(w http.ResponseWriter, req *http.Request, err error) {
 			if ipcheck.IsDenied(err) {
-				f.log.Warn("http ip denied", slog.String("target", req.Host), logger.Err(err))
+				log.Warn("http ip denied",
+					slog.String("host", req.Host),
+					slog.String(keyErrorSource, errSourcePolicy),
+					slog.String(keyDenyReason, ipcheck.Reason(err)),
+					logger.Err(err))
 				f.recordDeny(req.Context(), "ip")
 				http.Error(w, denyBody(req.Host, err), http.StatusForbidden)
 				return
 			}
-			f.log.Error("upstream error", logger.Err(err))
+			log.Error("upstream error",
+				slog.String("host", req.Host),
+				slog.String(keyErrorSource, errSourceUpstream),
+				logger.Err(err))
 			f.recordError(req.Context(), "upstream")
 			http.Error(w, "upstream error", http.StatusBadGateway)
 		},
@@ -498,9 +532,11 @@ func (f *DualForwarder) portAllowed(hostPort string) bool {
 // absolute URL) directly to the peer's proxy port, then streams the
 // response back to the client.
 func (f *DualForwarder) httpViaPeer(w http.ResponseWriter, r *http.Request, peer string) {
+	log := reqLog(f.log, r.Context())
 	conn, err := f.peerDialer.DialContext(r.Context(), "tcp", peer)
 	if err != nil {
-		f.log.Warn("peer dial failed", slog.String("peer", peer), logger.Err(err))
+		log.Warn("peer dial failed",
+			slog.String("peer", peer), slog.String(keyErrorSource, errSourceProxy), logger.Err(err))
 		http.Error(w, "peer unreachable", http.StatusBadGateway)
 		return
 	}
@@ -512,14 +548,16 @@ func (f *DualForwarder) httpViaPeer(w http.ResponseWriter, r *http.Request, peer
 	r.Header.Del("Proxy-Authorization")
 	r.Header.Set(HopHeader, "1")
 	if err := r.WriteProxy(conn); err != nil {
-		f.log.Warn("peer write failed", slog.String("peer", peer), logger.Err(err))
+		log.Warn("peer write failed",
+			slog.String("peer", peer), slog.String(keyErrorSource, errSourceProxy), logger.Err(err))
 		http.Error(w, "peer forward failed", http.StatusBadGateway)
 		return
 	}
 
 	resp, err := http.ReadResponse(bufio.NewReader(conn), r)
 	if err != nil {
-		f.log.Warn("peer response failed", slog.String("peer", peer), logger.Err(err))
+		log.Warn("peer response failed",
+			slog.String("peer", peer), slog.String(keyErrorSource, errSourceProxy), logger.Err(err))
 		http.Error(w, "peer forward failed", http.StatusBadGateway)
 		return
 	}

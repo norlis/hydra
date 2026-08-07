@@ -61,6 +61,18 @@ func TestErrAttr(t *testing.T) {
 	}
 }
 
+func TestWithComponent(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	base := newWithWriter(slog.LevelInfo, &buf)
+
+	WithComponent(base, "proxy").Info("hi")
+
+	if got := decodeLine(t, &buf)[KeyComponent]; got != "proxy" {
+		t.Errorf("%s = %v, want proxy", KeyComponent, got)
+	}
+}
+
 func TestParseLevel(t *testing.T) {
 	t.Parallel()
 	cases := map[string]slog.Level{

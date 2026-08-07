@@ -46,6 +46,10 @@ const (
 	proxyKeepAliveCount    = 3
 )
 
+// logComponent tags every data-plane log record so it can be filtered
+// apart from the control plane (see pkg/logger.WithComponent).
+const logComponent = "proxy"
+
 // StartProxyServers launches one HTTP server per discovered interface.
 // Each server listens on iface.ServicePort and binds outgoing
 // connections to iface.PrivateIP, so traffic routed through a
@@ -60,6 +64,7 @@ func StartProxyServers(
 	mtr *metrics.Metrics,
 	log *slog.Logger,
 ) error {
+	log = logger.WithComponent(log, logComponent)
 	ifaces := reg.All()
 
 	// Collect this node's local IPs so the classifier can deny
@@ -118,7 +123,7 @@ func StartProxyServers(
 		// Auth wraps the router so 407 short-circuits before any
 		// routing decision touches the request. With AuthModeNone the
 		// wrapper is a no-op and the handler is the bare router.
-		handler, err := WrapAuth(cfg.ProxyAuthMode, cfg.ProxyAuthUser, cfg.ProxyAuthPass, router)
+		handler, err := WrapAuth(cfg.ProxyAuthMode, cfg.ProxyAuthUser, cfg.ProxyAuthPass, router, log)
 		if err != nil {
 			rollback()
 			return fmt.Errorf("proxy: building auth handler: %w", err)

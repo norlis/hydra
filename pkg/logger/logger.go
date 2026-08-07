@@ -64,3 +64,19 @@ func newWithWriter(level slog.Level, w io.Writer) *slog.Logger {
 func Err(e error) slog.Attr {
 	return slog.Any("error", e)
 }
+
+// Structured-log field keys shared across subsystems.
+const (
+	// KeyComponent identifies the plane/subsystem a record belongs to
+	// (e.g. "proxy", "control").
+	KeyComponent = "component"
+	// KeyRequestID correlates every record emitted while handling a single
+	// proxied request.
+	KeyRequestID = "request_id"
+)
+
+// WithComponent returns a child logger that stamps component=name on every
+// record, so logs can be filtered per plane downstream.
+func WithComponent(l *slog.Logger, name string) *slog.Logger {
+	return l.With(slog.String(KeyComponent, name))
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -28,7 +29,7 @@ const proxyAuthRealm = "hydra"
 // authentication is implicit in the inter-node trust boundary, and
 // requiring credentials on every relayed hop would force every node
 // to share secrets that are already distributed by configuration.
-func WrapAuth(mode, user, pass string, next http.Handler) (http.Handler, error) {
+func WrapAuth(mode, user, pass string, next http.Handler, log *slog.Logger) (http.Handler, error) {
 	switch mode {
 	case "", AuthModeNone:
 		return next, nil
@@ -41,6 +42,7 @@ func WrapAuth(mode, user, pass string, next http.Handler) (http.Handler, error) 
 			pass:  pass,
 			realm: proxyAuthRealm,
 			next:  next,
+			log:   log,
 		}, nil
 	default:
 		return nil, fmt.Errorf("proxy: unknown auth mode %q", mode)
@@ -55,6 +57,7 @@ type basicAuth struct {
 	user, pass string
 	realm      string
 	next       http.Handler
+	log        *slog.Logger
 }
 
 func (b *basicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +69,10 @@ func (b *basicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	user, pass, ok := parseProxyBasicAuth(r.Header.Get("Proxy-Authorization"))
 	if !ok || !credentialsMatch(b.user, b.pass, user, pass) {
+		b.log.Warn("proxy auth required",
+			slog.String("host", r.Host),
+			slog.String(keyErrorSource, errSourcePolicy),
+			slog.String(keyDenyReason, denyReasonAuth))
 		w.Header().Set("Proxy-Authenticate", `Basic realm="`+b.realm+`"`)
 		http.Error(w, "proxy authentication required", http.StatusProxyAuthRequired)
 		return
