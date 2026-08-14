@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/norlis/httpgate/logging"
 	"github.com/norlis/hydra/internal/cluster"
 	"github.com/norlis/hydra/internal/proxy/metrics"
 	"github.com/norlis/hydra/internal/topology"
@@ -14,6 +15,13 @@ import (
 // request on the consistent hash ring. Callers set it to a stable
 // identifier (tenant id, user id, URL path, etc.).
 const EntityHeader = "X-Entity-ID"
+
+// Log field keys for standard concepts not exported by httpgate/logging
+// (server.address) and recurring Hydra domain fields.
+const (
+	keyServerAddress = "server.address"
+	keyEntityID      = "entity.id"
+)
 
 // Routing decisions. Kept as a closed enum so they survive as a low-
 // cardinality Prometheus label.
@@ -52,14 +60,11 @@ func NewRouter(
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// One correlation id per request, threaded via context so the forwarder's
-	// per-request logs join the router's under the same request_id.
-	req = req.WithContext(contextWithRequestID(req.Context(), newRequestID()))
-	rlog := reqLog(r.log, req.Context())
-
+	// The trace context lives in req.Context() (set by the TraceContext
+	// middleware); *Context log calls inject trace_id/span_id from it.
 	peer := r.peerFor(req)
 	decision := r.decisionFor(req, peer)
-	r.logDecision(rlog, req, peer, decision)
+	r.logDecision(req, peer, decision)
 
 	// CONNECT is hijacked by the forwarder; instrumentation lives in
 	// tunnelExternal/tunnelViaPeer (connect_attempts_total + canonical
@@ -78,15 +83,14 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Canonical decision log per finished HTTP request. Mirror of
 	// tunnel_done in forwarder.go: one structured line containing every
 	// field needed for post-mortem and audit.
-	rlog.Info("http_done",
-		slog.String("event", "http"),
-		slog.String("method", req.Method),
-		slog.String("host", req.Host),
-		slog.String("entity_id", req.Header.Get(EntityHeader)),
+	r.log.InfoContext(req.Context(), "request completed",
+		slog.String(logging.KeyHTTPRequestMethod, req.Method),
+		slog.String(keyServerAddress, req.Host),
+		slog.String(keyEntityID, req.Header.Get(EntityHeader)),
 		slog.String("decision", decision),
 		slog.String("peer", peer),
-		slog.Int("status", rec.status),
-		slog.Duration("duration", time.Since(start)),
+		slog.Int(logging.KeyHTTPResponseStatusCode, rec.status),
+		slog.Int64(logging.KeyEventDuration, time.Since(start).Nanoseconds()),
 	)
 }
 
@@ -118,11 +122,11 @@ func (r *Router) decisionFor(req *http.Request, peer string) string {
 //	peer       -> relayed to another node (peer address in "peer" field)
 //	hop-local  -> already forwarded once (HopHeader set), kept local to
 //	              avoid ping-pong loops during ring convergence
-func (r *Router) logDecision(l *slog.Logger, req *http.Request, peer, decision string) {
-	l.Info("proxy request",
-		slog.String("method", req.Method),
-		slog.String("host", req.Host),
-		slog.String("entity_id", req.Header.Get(EntityHeader)),
+func (r *Router) logDecision(req *http.Request, peer, decision string) {
+	r.log.DebugContext(req.Context(), "proxy request",
+		slog.String(logging.KeyHTTPRequestMethod, req.Method),
+		slog.String(keyServerAddress, req.Host),
+		slog.String(keyEntityID, req.Header.Get(EntityHeader)),
 		slog.String("decision", decision),
 		slog.String("peer", peer),
 	)
@@ -180,7 +184,7 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 	if !s.wroteHeader {
 		s.wroteHeader = true
 	}
-	return s.ResponseWriter.Write(b)
+	return s.ResponseWriter.Write(b) //nolint:wrapcheck // pass-through of the wrapped http.ResponseWriter; wrapping would break the ResponseWriter contract
 }
 
 // Flush proxies http.Flusher when the underlying writer supports it.

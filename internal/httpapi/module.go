@@ -154,7 +154,7 @@ func NewMeterProvider(lc fx.Lifecycle, cfg *hydra.Config, log *slog.Logger) (met
 		OnStop: func(ctx context.Context) error {
 			if err := provider.Shutdown(ctx); err != nil {
 				log.Warn("meter provider shutdown failed", hlogger.Err(err))
-				return err
+				return fmt.Errorf("meter provider shutdown: %w", err)
 			}
 			return nil
 		},

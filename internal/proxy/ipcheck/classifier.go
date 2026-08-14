@@ -182,7 +182,7 @@ func parsePrefixes(cidrs []string) ([]netip.Prefix, error) {
 	for _, c := range cidrs {
 		p, err := netip.ParsePrefix(c)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse cidr %q: %w", c, err)
 		}
 		prefixes = append(prefixes, p)
 	}

@@ -100,7 +100,7 @@ func TestHTTPExternalDeniedReturns403(t *testing.T) {
 	if rec2["deny_reason"] != "loopback" {
 		t.Errorf("deny_reason = %v, want loopback", rec2["deny_reason"])
 	}
-	if rec2["host"] != "127.0.0.1:9" {
-		t.Errorf("host = %v, want 127.0.0.1:9", rec2["host"])
+	if rec2["server.address"] != "127.0.0.1:9" {
+		t.Errorf("server.address = %v, want 127.0.0.1:9", rec2["server.address"])
 	}
 }

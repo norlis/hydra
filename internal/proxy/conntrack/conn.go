@@ -79,7 +79,7 @@ func (c *InstrumentedConn) Read(b []byte) (int, error) {
 		c.bytesIn.Add(int64(n))
 		c.touch()
 	}
-	return n, err
+	return n, err //nolint:wrapcheck // pass-through of the embedded net.Conn; wrapping breaks the io.EOF identity that io.Copy/splice compare with ==
 }
 
 func (c *InstrumentedConn) Write(b []byte) (int, error) {
@@ -88,7 +88,7 @@ func (c *InstrumentedConn) Write(b []byte) (int, error) {
 		c.bytesOut.Add(int64(n))
 		c.touch()
 	}
-	return n, err
+	return n, err //nolint:wrapcheck // pass-through of the embedded net.Conn; wrapping breaks the io.EOF identity that io.Copy/splice compare with ==
 }
 
 // Close idempotently closes the underlying conn and fires onClose with
@@ -120,7 +120,7 @@ func (c *InstrumentedConn) Close() error {
 	if cb != nil {
 		cb(stats)
 	}
-	return err
+	return err //nolint:wrapcheck // pass-through of the embedded net.Conn.Close; wrapping would break error identity for callers
 }
 
 // LastActivity returns the most recent Read/Write timestamp.

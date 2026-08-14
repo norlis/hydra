@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -70,7 +71,7 @@ func NewSeedProvider(
 			InstanceID:  cfg.GossIPNodeName,
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("cloudmap provider: %w", err)
 		}
 		lc.Append(fx.Hook{
 			OnStop: func(ctx context.Context) error { return cm.Shutdown(ctx) },

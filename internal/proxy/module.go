@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"fmt"
+
 	hydra "github.com/norlis/hydra/internal"
 	"github.com/norlis/hydra/internal/proxy/conntrack"
 	"github.com/norlis/hydra/internal/proxy/limiter"
@@ -28,7 +30,11 @@ var Module = fx.Module("proxy",
 // OTel MeterProvider that httpapi.NewMeterProvider configured with
 // the OTLP/HTTP exporter.
 func provideMetrics(mp metric.MeterProvider) (*metrics.Metrics, error) {
-	return metrics.New(mp)
+	m, err := metrics.New(mp)
+	if err != nil {
+		return nil, fmt.Errorf("proxy metrics: %w", err)
+	}
+	return m, nil
 }
 
 // provideTunnelLimiter builds the global tunnel limiter from

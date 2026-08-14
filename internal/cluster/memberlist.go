@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	stdlog "log"
 	"log/slog"
 	"strings"
 	"time"
@@ -96,7 +96,7 @@ func (m *MemberlistDiscovery) Start() error {
 
 	// Silence HashiCorp's internal logger; observability is handled by
 	// our own application logger.
-	config.Logger = log.New(io.Discard, "", 0)
+	config.Logger = stdlog.New(io.Discard, "", 0)
 
 	list, err := memberlist.Create(config)
 	if err != nil {
@@ -131,7 +131,10 @@ func (m *MemberlistDiscovery) Stop() error {
 	if err := m.list.Leave(5 * time.Second); err != nil {
 		m.log.Warn("graceful leave failed", hlogger.Err(err))
 	}
-	return m.list.Shutdown()
+	if err := m.list.Shutdown(); err != nil {
+		return fmt.Errorf("memberlist shutdown: %w", err)
+	}
+	return nil
 }
 
 // autoJoinLoop periodically re-resolves seeds and calls Join, but only
@@ -213,21 +216,13 @@ func (m *MemberlistDiscovery) GetActiveNodes() []topology.Node {
 // decodeMember prefers the gossiped Meta payload; falls back to a
 // minimal stub only when Meta is empty or cannot be parsed.
 func decodeMember(member *memberlist.Node, logger *slog.Logger) topology.Node {
-	if len(member.Meta) > 0 {
-		if raw, err := decodeMeta(member.Meta); err == nil {
-			var node topology.Node
-			if err := json.Unmarshal(raw, &node); err == nil {
-				// memberlist owns the authoritative ID and reachable address,
-				// so we normalize them regardless of what the peer published.
-				node.ID = member.Name
-				return node
-			}
-		}
-		if logger != nil {
-			logger.Warn("failed to decode peer NodeMeta, falling back to stub",
-				slog.String("node_id", member.Name),
-				slog.String("addr", member.Addr.String()))
-		}
+	if node, ok := decodePeerMeta(member); ok {
+		return node
+	}
+	if len(member.Meta) > 0 && logger != nil {
+		logger.Warn("failed to decode peer NodeMeta, falling back to stub",
+			slog.String("node_id", member.Name),
+			slog.String("addr", member.Addr.String()))
 	}
 	return topology.Node{
 		ID: member.Name,
@@ -238,6 +233,24 @@ func decodeMember(member *memberlist.Node, logger *slog.Logger) topology.Node {
 			},
 		},
 	}
+}
+
+// decodePeerMeta decodes the gossiped Meta payload into a Node, or ok=false
+// when Meta is absent or malformed. memberlist owns the authoritative ID.
+func decodePeerMeta(member *memberlist.Node) (topology.Node, bool) {
+	if len(member.Meta) == 0 {
+		return topology.Node{}, false
+	}
+	raw, err := decodeMeta(member.Meta)
+	if err != nil {
+		return topology.Node{}, false
+	}
+	var node topology.Node
+	if err := json.Unmarshal(raw, &node); err != nil {
+		return topology.Node{}, false
+	}
+	node.ID = member.Name
+	return node, true
 }
 
 // encodeMeta zlib-compresses a JSON payload so it fits in memberlist's
@@ -261,10 +274,14 @@ const decodeMetaMaxBytes = 1 << 20 // 1 MiB
 func decodeMeta(meta []byte) ([]byte, error) {
 	r, err := zlib.NewReader(bytes.NewReader(meta))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode meta: %w", err)
 	}
-	defer r.Close()
-	return io.ReadAll(io.LimitReader(r, decodeMetaMaxBytes))
+	defer func() { _ = r.Close() }()
+	data, err := io.ReadAll(io.LimitReader(r, decodeMetaMaxBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read meta: %w", err)
+	}
+	return data, nil
 }
 
 // GetLocalNode returns this instance's topology view.

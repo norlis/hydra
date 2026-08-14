@@ -14,6 +14,7 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -62,6 +63,14 @@ type Metrics struct {
 	attrDirD2C        metric.MeasurementOption
 }
 
+// wrapMetric annotates an instrument-creation error, or passes nil through.
+func wrapMetric(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("metrics: %w", err)
+}
+
 // New builds the Metrics bundle from an OTel MeterProvider. The
 // MeterProvider must already have a reader configured (the OTLP/HTTP
 // exporter; see httpapi.NewMeterProvider).
@@ -85,28 +94,28 @@ func New(mp metric.MeterProvider) (*Metrics, error) {
 				"hydra.proxy.active_tunnels",
 				metric.WithDescription("Number of currently open CONNECT tunnels."),
 			)
-			return err
+			return wrapMetric(err)
 		},
 		func() (err error) {
 			out.connectAttempts, err = m.Int64Counter(
 				"hydra.proxy.connect_attempts",
 				metric.WithDescription("CONNECT requests processed by outcome."),
 			)
-			return err
+			return wrapMetric(err)
 		},
 		func() (err error) {
 			out.connectDenied, err = m.Int64Counter(
 				"hydra.proxy.connect_denied",
 				metric.WithDescription("CONNECT denials by reason."),
 			)
-			return err
+			return wrapMetric(err)
 		},
 		func() (err error) {
 			out.connectErrors, err = m.Int64Counter(
 				"hydra.proxy.connect_errors",
 				metric.WithDescription("CONNECT failures by pipeline stage."),
 			)
-			return err
+			return wrapMetric(err)
 		},
 		func() (err error) {
 			out.bytesTransferred, err = m.Int64Counter(
@@ -114,14 +123,14 @@ func New(mp metric.MeterProvider) (*Metrics, error) {
 				metric.WithDescription("Bytes piped through tunnels."),
 				metric.WithUnit("By"),
 			)
-			return err
+			return wrapMetric(err)
 		},
 		func() (err error) {
 			out.requestsTotal, err = m.Int64Counter(
 				"hydra.proxy.requests",
 				metric.WithDescription("Proxy requests by method, status class and routing decision."),
 			)
-			return err
+			return wrapMetric(err)
 		},
 		func() (err error) {
 			// Bucket boundaries are configured via SDK Views in
@@ -131,14 +140,14 @@ func New(mp metric.MeterProvider) (*Metrics, error) {
 				"hydra.proxy.connect_setup_seconds",
 				metric.WithDescription("Time from CONNECT received to 200 Established."),
 			)
-			return err
+			return wrapMetric(err)
 		},
 		func() (err error) {
 			out.tunnelDuration, err = m.Float64Histogram(
 				"hydra.proxy.tunnel_seconds",
 				metric.WithDescription("Total CONNECT tunnel lifetime."),
 			)
-			return err
+			return wrapMetric(err)
 		},
 	}
 	for _, b := range builders {

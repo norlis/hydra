@@ -69,8 +69,8 @@ func (b *basicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	user, pass, ok := parseProxyBasicAuth(r.Header.Get("Proxy-Authorization"))
 	if !ok || !credentialsMatch(b.user, b.pass, user, pass) {
-		b.log.Warn("proxy auth required",
-			slog.String("host", r.Host),
+		b.log.WarnContext(r.Context(), "proxy auth required",
+			slog.String(keyServerAddress, r.Host),
 			slog.String(keyErrorSource, errSourcePolicy),
 			slog.String(keyDenyReason, denyReasonAuth))
 		w.Header().Set("Proxy-Authenticate", `Basic realm="`+b.realm+`"`)

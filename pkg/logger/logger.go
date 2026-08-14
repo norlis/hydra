@@ -1,11 +1,29 @@
+// Package logger is Hydra's thin logging facade over the platform standard
+// (github.com/norlis/httpgate/logging). It adds only Hydra domain helpers;
+// the logger itself is built with logging.New in cmd/hydra.
 package logger
 
 import (
-	"io"
 	"log/slog"
-	"os"
 	"strings"
+
+	"github.com/norlis/httpgate/logging"
 )
+
+// KeyComponent is the Hydra domain field distinguishing data-plane and
+// control-plane logs (not covered by the platform standard).
+const KeyComponent = "component"
+
+// WithComponent stamps component=name on every record so data-plane and
+// control-plane logs can be filtered apart.
+func WithComponent(l *slog.Logger, name string) *slog.Logger {
+	return l.With(slog.String(KeyComponent, name))
+}
+
+// Err renders err as the platform-standard error object
+// (error.type / error.message / error.stack_trace). Kept as a delegate so
+// existing call sites (logger.Err) need no change.
+func Err(e error) slog.Attr { return logging.Err(e) }
 
 // ParseLevel maps a LOG_LEVEL string (case-insensitive) to a slog.Level.
 // Empty or unknown values default to Info.
@@ -20,63 +38,4 @@ func ParseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// New builds a production JSON logger writing to stderr. The level is
-// intentionally a plain string (not a *Config) so this package stays
-// independent of the internal/hydra package.
-func New(level string) *slog.Logger {
-	return NewWithLevel(ParseLevel(level))
-}
-
-// NewWithLevel is New with an explicit slog.Level, for callers that
-// need to derive the level programmatically (e.g. the fx event logger).
-func NewWithLevel(level slog.Level) *slog.Logger {
-	return newWithWriter(level, os.Stderr)
-}
-
-// newWithWriter is the testable core. Hybrid schema over slog defaults:
-// lowercase level, "timestamp" key instead of "time", and a pid field.
-func newWithWriter(level slog.Level, w io.Writer) *slog.Logger {
-	h := slog.NewJSONHandler(w, &slog.HandlerOptions{
-		Level:     level,
-		AddSource: true,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if len(groups) > 0 {
-				return a
-			}
-			switch a.Key {
-			case slog.TimeKey:
-				a.Key = "timestamp"
-			case slog.LevelKey:
-				if lvl, ok := a.Value.Any().(slog.Level); ok {
-					a.Value = slog.StringValue(strings.ToLower(lvl.String()))
-				}
-			}
-			return a
-		},
-	})
-	return slog.New(h).With(slog.Int("pid", os.Getpid()))
-}
-
-// Err adapts an error to the canonical "error" attribute (replaces zap.Error).
-// slog's JSONHandler renders error values via err.Error().
-func Err(e error) slog.Attr {
-	return slog.Any("error", e)
-}
-
-// Structured-log field keys shared across subsystems.
-const (
-	// KeyComponent identifies the plane/subsystem a record belongs to
-	// (e.g. "proxy", "control").
-	KeyComponent = "component"
-	// KeyRequestID correlates every record emitted while handling a single
-	// proxied request.
-	KeyRequestID = "request_id"
-)
-
-// WithComponent returns a child logger that stamps component=name on every
-// record, so logs can be filtered per plane downstream.
-func WithComponent(l *slog.Logger, name string) *slog.Logger {
-	return l.With(slog.String(KeyComponent, name))
 }

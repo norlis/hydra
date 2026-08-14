@@ -42,7 +42,7 @@ type Params struct {
 func NewHttpApi(params Params) {
 	log := logger.WithComponent(params.Logger, logComponent)
 	base := []middleware.Middleware{
-		middleware.TraceID(middleware.WithHeaderName("x-request-id"), middleware.WithLogger(log)),
+		middleware.TraceContext(middleware.WithResponseHeader("X-Request-ID")),
 		middleware.InterceptStatus(
 			middleware.WithIntercept(http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError),
 			middleware.WithMessage(http.StatusNotFound, "resource not found"),

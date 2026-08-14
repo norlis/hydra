@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/norlis/httpgate/middleware"
 	hydra "github.com/norlis/hydra/internal"
 	"github.com/norlis/hydra/internal/cluster"
 	"github.com/norlis/hydra/internal/network"
@@ -19,6 +20,7 @@ import (
 	"github.com/norlis/hydra/internal/proxy/ipcheck"
 	"github.com/norlis/hydra/internal/proxy/limiter"
 	"github.com/norlis/hydra/internal/proxy/metrics"
+	"github.com/norlis/hydra/internal/topology"
 	"github.com/norlis/hydra/pkg/logger"
 	"go.uber.org/fx"
 )
@@ -107,44 +109,10 @@ func StartProxyServers(
 		}
 	}
 	for _, iface := range ifaces {
-		forwarder := NewDualForwarder(
-			iface,
-			cfg.ProxyStripHeaders,
-			cfg.ProxyAllowedPorts,
-			classifier,
-			tracker,
-			tunnelLimit,
-			cfg.ProxyIdleTimeout,
-			mtr,
-			log,
-		)
-		router := NewRouter(iface, ring, forwarder, mtr, log)
-
-		// Auth wraps the router so 407 short-circuits before any
-		// routing decision touches the request. With AuthModeNone the
-		// wrapper is a no-op and the handler is the bare router.
-		handler, err := WrapAuth(cfg.ProxyAuthMode, cfg.ProxyAuthUser, cfg.ProxyAuthPass, router, log)
+		srv, ln, err := buildProxyServer(iface, cfg, ring, classifier, tracker, tunnelLimit, mtr, listenCfg, log)
 		if err != nil {
 			rollback()
-			return fmt.Errorf("proxy: building auth handler: %w", err)
-		}
-
-		addr := fmt.Sprintf(":%d", iface.ServicePort)
-		ln, err := listenCfg.Listen(context.Background(), "tcp", addr)
-		if err != nil {
-			rollback()
-			return fmt.Errorf("proxy: listening on %s: %w", addr, err)
-		}
-
-		srv := &http.Server{
-			Addr:              addr,
-			Handler:           handler,
-			ReadHeaderTimeout: 30 * time.Second,
-			IdleTimeout:       300 * time.Second,
-			MaxHeaderBytes:    proxyMaxHeaderBytes,
-			// Disable HTTP/2 explicitly: HTTP/2 doesn't expose Hijacker
-			// and breaks the CONNECT tunneling we rely on.
-			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+			return err
 		}
 		servers = append(servers, boundServer{srv: srv, ln: ln})
 		log.Info("proxy configured",
@@ -198,4 +166,54 @@ func StartProxyServers(
 		},
 	})
 	return nil
+}
+
+// buildProxyServer wires one interface's forwarder + router + auth + trace
+// handler and its bound listener. Returns an error if auth construction or
+// the port bind fails.
+func buildProxyServer(
+	iface topology.NetworkInterface,
+	cfg *hydra.Config,
+	ring *cluster.Ring,
+	classifier *ipcheck.Classifier,
+	tracker *conntrack.Tracker,
+	tunnelLimit *limiter.Tunnel,
+	mtr *metrics.Metrics,
+	listenCfg net.ListenConfig,
+	log *slog.Logger,
+) (*http.Server, net.Listener, error) {
+	forwarder := NewDualForwarder(
+		iface, cfg.ProxyStripHeaders, cfg.ProxyAllowedPorts, classifier,
+		tracker, tunnelLimit, cfg.ProxyIdleTimeout, mtr, log,
+	)
+	router := NewRouter(iface, ring, forwarder, mtr, log)
+
+	// Auth wraps the router so 407 short-circuits before any routing decision.
+	// With AuthModeNone the wrapper is a no-op and the handler is the bare router.
+	handler, err := WrapAuth(cfg.ProxyAuthMode, cfg.ProxyAuthUser, cfg.ProxyAuthPass, router, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("proxy: building auth handler: %w", err)
+	}
+	// TraceContext outermost: extract/generate W3C trace before auth, so even a
+	// 407 carries it, and echo the trace id to clients. Pass-through, so CONNECT
+	// hijack is unaffected.
+	handler = middleware.TraceContext(middleware.WithResponseHeader("X-Request-ID"))(handler)
+
+	addr := fmt.Sprintf(":%d", iface.ServicePort)
+	ln, err := listenCfg.Listen(context.Background(), "tcp", addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("proxy: listening on %s: %w", addr, err)
+	}
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       300 * time.Second,
+		MaxHeaderBytes:    proxyMaxHeaderBytes,
+		// Disable HTTP/2 explicitly: HTTP/2 doesn't expose Hijacker and
+		// breaks the CONNECT tunneling we rely on.
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+	}
+	return srv, ln, nil
 }

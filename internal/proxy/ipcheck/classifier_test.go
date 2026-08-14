@@ -18,6 +18,7 @@ func TestReason(t *testing.T) {
 }
 
 func TestClassifier_Classify(t *testing.T) {
+	t.Parallel()
 	_ = t.Context()
 
 	// Utilizamos netip.MustParseAddr en lugar de net.ParseIP
@@ -51,6 +52,7 @@ func TestClassifier_Classify(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Parseamos usando netip
 			ip, err := netip.ParseAddr(tt.ip)
 			if err != nil {
@@ -66,6 +68,7 @@ func TestClassifier_Classify(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
+	t.Parallel()
 	_ = t.Context()
 
 	c, err := New(nil, nil, nil)

@@ -105,7 +105,10 @@ func (c *CloudMap) Shutdown(ctx context.Context) error {
 		InstanceId: new(c.cfg.InstanceID),
 		ServiceId:  new(serviceID),
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("cloudmap deregister: %w", err)
+	}
+	return nil
 }
 
 // ensureRegistered resolves the service ID and registers this instance
@@ -224,7 +227,7 @@ func (c *CloudMap) discoverPeers(ctx context.Context) ([]string, error) {
 func localIPv4() (string, error) {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("list interface addrs: %w", err)
 	}
 	for _, a := range addrs {
 		ipNet, ok := a.(*net.IPNet)

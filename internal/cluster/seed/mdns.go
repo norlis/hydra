@@ -78,7 +78,7 @@ func (p *MDNSProvider) query() ([]string, error) {
 	}()
 
 	selfPrefix := p.nodeName + "."
-	var found []string
+	found := make([]string, 0, cap(entries))
 	for entry := range entries {
 		if strings.HasPrefix(entry.Name, selfPrefix) {
 			continue
@@ -102,5 +102,8 @@ func (p *MDNSProvider) Shutdown() error {
 	if p.server == nil {
 		return nil
 	}
-	return p.server.Shutdown()
+	if err := p.server.Shutdown(); err != nil {
+		return fmt.Errorf("mdns shutdown: %w", err)
+	}
+	return nil
 }
