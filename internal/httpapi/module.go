@@ -51,15 +51,9 @@ var Module = fx.Module("httpapi",
 	fx.Provide(NewReadinessGate),
 	fx.Provide(
 		fx.Annotate(handlers.NewTopologyHandler, fx.As(new(Route)), fx.ResultTags(`group:"routes"`)),
-		fx.Annotate(handlers.NewResolveHandler, fx.As(new(Route)), fx.ResultTags(`group:"routes"`)),
+		fx.Annotate(handlers.NewResolveHandler, fx.From(new(*cluster.Ring)), fx.As(new(Route)), fx.ResultTags(`group:"routes"`)),
 	),
-	fx.Provide(func() *health.Status {
-		version := version.GitHash
-		if version == "" {
-			version = "unknown.dev"
-		}
-		return health.NewStatus(version)
-	}),
+	fx.Provide(func() *health.Status { return health.NewStatus(version.GitHash) }),
 	fx.Invoke(MountAdminEndpoints),
 	fx.Invoke(NewHttpApi),
 )
@@ -153,7 +147,6 @@ func NewMeterProvider(lc fx.Lifecycle, cfg *hydra.Config, log *slog.Logger) (met
 	lc.Append(fx.Hook{
 		OnStop: func(ctx context.Context) error {
 			if err := provider.Shutdown(ctx); err != nil {
-				log.Warn("meter provider shutdown failed", hlogger.Err(err))
 				return fmt.Errorf("meter provider shutdown: %w", err)
 			}
 			return nil
@@ -233,7 +226,6 @@ func NewHttpServerMux(lc fx.Lifecycle, cfg *hydra.Config, ready *health.Readines
 			defer cancel()
 
 			if err := server.Shutdown(shutdownCtx); err != nil {
-				log.Error("control plane shutdown failed", hlogger.Err(err))
 				return fmt.Errorf("failed to shutdown HTTP server: %w", err)
 			}
 			log.Info("control plane stopped")

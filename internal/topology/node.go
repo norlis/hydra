@@ -1,6 +1,7 @@
 package topology
 
 import (
+	"net"
 	"strconv"
 	"time"
 )
@@ -14,7 +15,6 @@ type NetworkInterface struct {
 	PublicIP    string `json:"public_ip,omitempty"`
 	SubnetCIDR  string `json:"subnet_cidr,omitempty"`
 	ServicePort int    `json:"service_port"`
-	Reachable   bool   `json:"reachable,omitempty"`
 	PhysicalID  string `json:"physical_id,omitempty"`
 }
 
@@ -24,27 +24,23 @@ func (n *NetworkInterface) Address() string {
 
 // Node is an abstract participant in the mesh topology.
 type Node struct {
-	ID         string             `json:"id"`
-	Zone       string             `json:"zone,omitempty"` // e.g. "us-east-1", "datacenter-south", "rack-4"
+	ID string `json:"id"`
+	// Gossip address: interface IPs may be unreachable from peers (VPN
+	// tunnels) or shared by several hosts (VM bridges).
+	Addr       string             `json:"addr,omitempty"`
 	Interfaces []NetworkInterface `json:"interfaces"`
 	LastSeen   time.Time          `json:"last_seen"`
 	StartedAt  *time.Time         `json:"started_at,omitempty"`
 	Healthy    bool               `json:"healthy"`
 	Version    string             `json:"version,omitempty"` // binary version (git tag or short commit), injected at build time
-
-	// Labels allows injecting arbitrary metadata without changing the
-	// struct (extensibility). E.g. {"provider": "aws", "role": "edge-proxy"}.
-	Labels map[string]string `json:"labels,omitempty"`
 }
 
-func (n *Node) GetPrimaryIP() string {
-	if len(n.Interfaces) > 0 {
-		return n.Interfaces[0].PrivateIP
+// ProxyAddress pairs the node address with the interface port: proxies
+// listen on every address, so the relay still lands on that interface.
+func (n Node) ProxyAddress(iface NetworkInterface) string {
+	host := n.Addr
+	if host == "" {
+		host = iface.PrivateIP
 	}
-	return ""
-}
-
-func (n *Node) HasRole(role string) bool {
-	val, exists := n.Labels["role"]
-	return exists && val == role
+	return net.JoinHostPort(host, strconv.Itoa(iface.ServicePort))
 }

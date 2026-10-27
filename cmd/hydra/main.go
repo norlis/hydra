@@ -20,11 +20,22 @@ import (
 )
 
 func main() {
-	fxApp := fx.New(
+	fxApp := fx.New(options())
+
+	if err := fxApp.Err(); err != nil {
+		log.Panicf("FX application failed to initialize: %v", err)
+	}
+
+	fxApp.Run()
+}
+
+// options assembles the dependency graph. Kept separate from main so a
+// test can validate the graph with fx.ValidateApp without starting it.
+func options() fx.Option {
+	return fx.Options(
 		// Cross-cutting infrastructure. The logger reads LOG_LEVEL from
-		// the environment directly so Config can depend on it (Config's
-		// own LogLevel field is ignored here; we break what would be
-		// a Config↔Logger cycle by keeping the logger free of Config).
+		// the environment directly so Config can depend on it (keeping
+		// the logger free of Config breaks what would be a cycle).
 		fx.Provide(func() *slog.Logger {
 			// Platform-standard logger: OTel/ECS field names, ISO 8601 ms
 			// timestamps and automatic trace-context injection. Sourced
@@ -65,10 +76,4 @@ func main() {
 		// the lifecycle even without other consumers yet.
 		fx.Invoke(func(cluster.Discovery) {}),
 	)
-
-	if err := fxApp.Err(); err != nil {
-		log.Panicf("FX application failed to initialize: %v", err)
-	}
-
-	fxApp.Run()
 }

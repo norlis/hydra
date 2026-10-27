@@ -30,12 +30,9 @@ type Params struct {
 
 // NewHttpApi
 // @title           hydra
-// @version         1.0
-// @description     Esta es una API generada automáticamente con Swaggo.
+// @description     Control plane of Hydra, a self-clustering HTTP forward proxy mesh: cluster topology, entity-to-node resolution, live cluster events and health probes.
 // @termsOfService  http://swagger.io/terms/
 // @contact.name   Norlis Viamonte
-// @contact.url    http://www.example.com/support
-// @contact.email  norlis.viamonte@gmail.com
 // @host
 // @BasePath  /
 // @openapi 3.0.0.
@@ -68,6 +65,8 @@ func NewHttpApi(params Params) {
 	// UI
 	params.Router.HandleFunc("GET /events", params.WebHandler.EventsPage)
 	params.Router.Handle("GET /assets/", http.StripPrefix("/assets/", params.WebHandler.ServeAssets()))
+
+	params.Router.Handle(swaggerRoute, chain.Then(swaggerHandler()))
 
 	// health / readiness / liveness
 	params.Router.Handle("GET /health", chain.Then(health.NewProbe(map[string]health.Checker{

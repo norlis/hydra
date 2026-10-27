@@ -11,8 +11,7 @@ import (
 )
 
 // InstrumentedConn wraps a net.Conn and counts bytes flowing through it.
-// LastActivity exposes a monotonic snapshot useful for idle-timeout
-// enforcement; OnClose fires exactly once when Close completes.
+// onClose fires exactly once when Close completes with the final counters.
 //
 // When idleTimeout > 0, an internal time.AfterFunc force-expires the
 // underlying conn (via SetDeadline(now)) if no Read/Write touches it
@@ -26,11 +25,10 @@ type InstrumentedConn struct {
 	bytesIn  atomic.Int64
 	bytesOut atomic.Int64
 
-	mu           sync.Mutex
-	lastActivity time.Time
-	createdAt    time.Time
-	closed       bool
-	onClose      func(stats Stats)
+	mu        sync.Mutex
+	createdAt time.Time
+	closed    bool
+	onClose   func(stats Stats)
 
 	idleTimeout time.Duration
 	idleTimer   *time.Timer
@@ -44,24 +42,16 @@ type Stats struct {
 	CreatedAt time.Time
 }
 
-// Wrap turns an existing net.Conn into an InstrumentedConn with no idle
-// watchdog. Use WrapWithIdle when an idle timeout is required.
-func Wrap(c net.Conn, onClose func(Stats)) *InstrumentedConn {
-	return WrapWithIdle(c, 0, onClose)
-}
-
 // WrapWithIdle wraps c and arms an idle watchdog. idle <= 0 disables
-// the watchdog (equivalent to Wrap). When the timer fires, the
+// the watchdog. When the timer fires, the
 // underlying conn's deadline is set to now so any pending or future
 // Read/Write fails immediately and the splice goroutine unwinds.
 func WrapWithIdle(c net.Conn, idle time.Duration, onClose func(Stats)) *InstrumentedConn {
-	now := time.Now()
 	ic := &InstrumentedConn{
-		Conn:         c,
-		lastActivity: now,
-		createdAt:    now,
-		onClose:      onClose,
-		idleTimeout:  idle,
+		Conn:        c,
+		createdAt:   time.Now(),
+		onClose:     onClose,
+		idleTimeout: idle,
 	}
 	if idle > 0 {
 		// AfterFunc captures ic; the closure runs on its own goroutine
@@ -123,21 +113,9 @@ func (c *InstrumentedConn) Close() error {
 	return err //nolint:wrapcheck // pass-through of the embedded net.Conn.Close; wrapping would break error identity for callers
 }
 
-// LastActivity returns the most recent Read/Write timestamp.
-func (c *InstrumentedConn) LastActivity() time.Time {
-	c.mu.Lock()
-	t := c.lastActivity
-	c.mu.Unlock()
-	return t
-}
-
-// BytesIn / BytesOut return live counters (safe to read concurrently).
-func (c *InstrumentedConn) BytesIn() int64  { return c.bytesIn.Load() }
-func (c *InstrumentedConn) BytesOut() int64 { return c.bytesOut.Load() }
-
+// touch re-arms the idle watchdog after any read or write.
 func (c *InstrumentedConn) touch() {
 	c.mu.Lock()
-	c.lastActivity = time.Now()
 	if c.idleTimer != nil {
 		// Reset is safe on an active timer; on a fired-but-not-yet-run
 		// timer it may race with the AfterFunc goroutine, but the

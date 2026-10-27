@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/norlis/hydra/internal/bus"
 	"github.com/norlis/hydra/internal/topology"
 )
 
@@ -13,11 +12,10 @@ type stubDiscovery struct {
 	local topology.Node
 }
 
-func (s *stubDiscovery) Start() error                       { return nil }
-func (s *stubDiscovery) Stop() error                        { return nil }
-func (s *stubDiscovery) GetActiveNodes() []topology.Node    { return nil }
-func (s *stubDiscovery) GetLocalNode() topology.Node        { return s.local }
-func (s *stubDiscovery) Subscribe() <-chan bus.ClusterEvent { return nil }
+func (s *stubDiscovery) Start() error                    { return nil }
+func (s *stubDiscovery) Stop() error                     { return nil }
+func (s *stubDiscovery) GetActiveNodes() []topology.Node { return nil }
+func (s *stubDiscovery) GetLocalNode() topology.Node     { return s.local }
 
 func TestCheckNilDiscovery(t *testing.T) {
 	t.Parallel()

@@ -11,9 +11,7 @@ const docTemplate = `{
         "title": "{{.Title}}",
         "termsOfService": "http://swagger.io/terms/",
         "contact": {
-            "name": "Norlis Viamonte",
-            "url": "http://www.example.com/support",
-            "email": "norlis.viamonte@gmail.com"
+            "name": "Norlis Viamonte"
         },
         "version": "{{.Version}}"
     },
@@ -65,14 +63,14 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_norlis_hydra_internal_topology.Node"
+                                "$ref": "#/definitions/Node"
                             }
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/problem.Detail"
+                            "$ref": "#/definitions/Detail"
                         }
                     }
                 }
@@ -97,14 +95,14 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/internal_httpapi_handlers.ProxyInfo"
+                                "$ref": "#/definitions/ProxyInfo"
                             }
                         }
                     },
                     "500": {
                         "description": "Internal error",
                         "schema": {
-                            "$ref": "#/definitions/problem.Detail"
+                            "$ref": "#/definitions/Detail"
                         }
                     }
                 }
@@ -112,7 +110,7 @@ const docTemplate = `{
         },
         "/api/proxies/test": {
             "get": {
-                "description": "Checks if a proxy address is operational by routing a request through it.\nThe target defaults to https://checkip.amazonaws.com (returns the egress IP).\nNote: requires outbound internet access; will fail in air-gapped networks.",
+                "description": "Checks if a proxy address is operational by routing a request through it.\nThe target defaults to https://checkip.amazonaws.com (returns the egress IP).\nNote: requires outbound internet access; will fail in air-gapped networks.\nThe proxy must be a member of this mesh (see /api/proxies) and\nthe target is subject to the same egress policy as the data plane.",
                 "produces": [
                     "application/json"
                 ],
@@ -142,6 +140,18 @@ const docTemplate = `{
                             "type": "object",
                             "additionalProperties": true
                         }
+                    },
+                    "400": {
+                        "description": "Malformed address or target",
+                        "schema": {
+                            "$ref": "#/definitions/Detail"
+                        }
+                    },
+                    "403": {
+                        "description": "Address outside the mesh or target denied by egress policy",
+                        "schema": {
+                            "$ref": "#/definitions/Detail"
+                        }
                     }
                 }
             }
@@ -169,7 +179,8 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "type": "string"
-                            }
+                            },
+                            "example": "[\"entity-1\",\"entity-2\"]"
                         }
                     }
                 ],
@@ -179,7 +190,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
-                                "$ref": "#/definitions/internal_httpapi_handlers.resolvedNode"
+                                "$ref": "#/definitions/resolvedNode"
                             }
                         }
                     },
@@ -206,97 +217,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_norlis_hydra_internal_topology.NetworkInterface": {
-            "type": "object",
-            "properties": {
-                "mac": {
-                    "type": "string"
-                },
-                "name": {
-                    "description": "e.g. \"eth0\", \"en0\"",
-                    "type": "string"
-                },
-                "physical_id": {
-                    "type": "string"
-                },
-                "private_ip": {
-                    "type": "string"
-                },
-                "public_ip": {
-                    "type": "string"
-                },
-                "reachable": {
-                    "type": "boolean"
-                },
-                "service_port": {
-                    "type": "integer"
-                },
-                "subnet_cidr": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_norlis_hydra_internal_topology.Node": {
-            "type": "object",
-            "properties": {
-                "healthy": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "interfaces": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_norlis_hydra_internal_topology.NetworkInterface"
-                    }
-                },
-                "labels": {
-                    "description": "Labels allows injecting arbitrary metadata without changing the\nstruct (extensibility). E.g. {\"provider\": \"aws\", \"role\": \"edge-proxy\"}.",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "last_seen": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "version": {
-                    "description": "binary version (git tag or short commit), injected at build time",
-                    "type": "string"
-                },
-                "zone": {
-                    "description": "e.g. \"us-east-1\", \"datacenter-south\", \"rack-4\"",
-                    "type": "string"
-                }
-            }
-        },
-        "internal_httpapi_handlers.ProxyInfo": {
-            "type": "object",
-            "properties": {
-                "address": {
-                    "type": "string"
-                },
-                "node_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "internal_httpapi_handlers.resolvedNode": {
-            "type": "object",
-            "properties": {
-                "address": {
-                    "type": "string"
-                },
-                "node_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "problem.Detail": {
+        "Detail": {
             "type": "object",
             "properties": {
                 "detail": {
@@ -328,18 +249,100 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "NetworkInterface": {
+            "type": "object",
+            "properties": {
+                "mac": {
+                    "type": "string"
+                },
+                "name": {
+                    "description": "e.g. \"eth0\", \"en0\"",
+                    "type": "string"
+                },
+                "physical_id": {
+                    "type": "string"
+                },
+                "private_ip": {
+                    "type": "string"
+                },
+                "public_ip": {
+                    "type": "string"
+                },
+                "service_port": {
+                    "type": "integer"
+                },
+                "subnet_cidr": {
+                    "type": "string"
+                }
+            }
+        },
+        "Node": {
+            "type": "object",
+            "properties": {
+                "addr": {
+                    "description": "Gossip address: interface IPs may be unreachable from peers (VPN\ntunnels) or shared by several hosts (VM bridges).",
+                    "type": "string"
+                },
+                "healthy": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "interfaces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/NetworkInterface"
+                    }
+                },
+                "last_seen": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "description": "binary version (git tag or short commit), injected at build time",
+                    "type": "string"
+                }
+            }
+        },
+        "ProxyInfo": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "resolvedNode": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "example": "192.168.100.158:3128"
+                },
+                "node_id": {
+                    "type": "string",
+                    "example": "zero1"
+                }
+            }
         }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
+	Version:          "",
 	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "hydra",
-	Description:      "Esta es una API generada automáticamente con Swaggo.",
+	Description:      "Control plane of Hydra, a self-clustering HTTP forward proxy mesh: cluster topology, entity-to-node resolution, live cluster events and health probes.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

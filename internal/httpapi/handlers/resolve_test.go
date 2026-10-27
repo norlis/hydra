@@ -35,12 +35,12 @@ func (f *fakeResolver) EndpointFor(entityID string) *cluster.Endpoint {
 }
 
 func newHandler(f *fakeResolver) *ResolveHandler {
-	return &ResolveHandler{ring: f, render: httpx.New(slogDiscard()), logger: slogDiscard()}
+	return NewResolveHandler(f, httpx.New(slogDiscard()), slogDiscard())
 }
 
 func post(t *testing.T, h *ResolveHandler, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/resolve", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/resolve", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.Resolve(rec, req)
 	return rec

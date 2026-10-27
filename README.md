@@ -22,14 +22,85 @@ Self-clustering proxy mesh. Every node joins a gossip cluster on startup, discov
 
 ## Quick start (local)
 
+In `local` mode each node discovers its own network interfaces and announces itself over **mDNS**, so nodes on the same LAN find each other without static seeds. Two variables are enough:
+
 ```sh
-go build -o hydra ./cmd/hydra
-ENVIRONMENT=local HYDRA_NODE_NAME=node-a ./hydra
-# on another terminal (or host)
-ENVIRONMENT=local HYDRA_NODE_NAME=node-b HYDRA_GOSSIP_PORT=7947 ./hydra
+make build   # or: go build -o build/darwin/arm64/hydra ./cmd/hydra
+
+OTEL_SDK_DISABLED=true ENVIRONMENT=local ./build/darwin/arm64/hydra
 ```
 
-In `local` mode the nodes publish themselves over **mDNS** on the LAN and join each other without any static seeds.
+| Variable | Why |
+|---|---|
+| `ENVIRONMENT=local` | Host interfaces + mDNS discovery (it is also the default). |
+| `OTEL_SDK_DISABLED=true` | No OTLP collector runs locally; without it the exporter keeps failing to push metrics. |
+
+The node takes the machine's hostname as its name. Set `HYDRA_NODE_NAME` only when two nodes would share it: two machines with the same hostname, or two nodes on one machine. Two nodes with the same name cannot both join.
+
+What it opens: one proxy per IPv4 interface starting at `BASE_PORT` (3128, 3129, …; the port picks the egress NIC), the control plane on `9192`, and gossip on `7946` TCP+UDP. macOS may ask to allow incoming connections the first time.
+
+Check it:
+
+```sh
+curl -x http://127.0.0.1:3128 https://checkip.amazonaws.com/   # egress IP
+curl http://127.0.0.1:9192/api/proxies                          # one entry per node × interface
+open http://127.0.0.1:9192/events                               # live topology UI
+```
+
+Loopback and private destinations answer `403` by design (SSRF policy). To reach something on your LAN, add `HYDRA_PROXY_ALLOW_CIDR=192.168.0.0/16` (or the range you need).
+
+**Another node on a different machine** of the same LAN: run the same command; mDNS joins them.
+
+**Another node on the same machine**: it also needs its own ports, otherwise it fails to bind.
+
+```sh
+OTEL_SDK_DISABLED=true HYDRA_NODE_NAME=n2 ENVIRONMENT=local \
+  BASE_PORT=4128 CONTROL_PORT=9193 HYDRA_GOSSIP_PORT=7947 ./build/darwin/arm64/hydra
+```
+
+Requests carrying the same `X-Entity-ID` are routed to the same owner node whichever proxy receives them. For HTTPS the header must travel on the `CONNECT` itself, so use `--proxy-header`; curl's `-H` only reaches the origin, inside the tunnel, and the proxy never sees it:
+
+```sh
+curl -x http://127.0.0.1:3128 --proxy-header 'X-Entity-ID: tenant-42' https://checkip.amazonaws.com/
+curl -x http://127.0.0.1:3128 -H 'X-Entity-ID: tenant-42' http://checkip.amazonaws.com/    # plain HTTP: -H is enough
+```
+
+To see who owns an entity, ask any node; every node answers the same:
+
+```sh
+curl -X POST -d '["tenant-42"]' http://127.0.0.1:9192/api/resolve
+```
+
+Every request logs a `request completed` line with its `decision`:
+
+| `decision` | Meaning |
+|---|---|
+| `local` | The entity belongs to the interface that received it; it egresses here. |
+| `handoff` | It belongs to another interface of this node; relayed to that interface's port. |
+| `peer` | It belongs to another node; relayed to `peer`. On a CONNECT, an empty `peer` means the peer was unreachable and the tunnel fell back to a direct dial. |
+| `hop-local` | It arrived relayed from another node or interface; it egresses here. |
+
+Relays target the peer's gossip address with the owning interface's port, so an interface IP the peers cannot reach (a VPN tunnel) or that two hosts share (a VM bridge) does not break routing.
+
+**Pick the interfaces.** Laptops expose VM bridges and VPN links that cannot reach the internet. Serve only the ones that can, in the order you want their ports:
+
+```sh
+HYDRA_INTERFACES=en0,utun32 ...   # en0 → 3128, utun32 → 3129
+```
+
+**macOS firewall.** Gossip probes peers over UDP. With the application firewall on, an unlisted binary gets its incoming UDP dropped, and the nodes keep marking each other failed and rejoining every few seconds (`node left` / `node joined` in the logs). Allow the binary on every Mac, and again after each rebuild:
+
+```sh
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PWD/build/darwin/arm64/hydra"
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$PWD/build/darwin/arm64/hydra"
+```
+
+**Tailscale exit node.** An active exit node routes the LAN through the tunnel too, which breaks mDNS and gossip between the machines. Keep LAN access on, and give a static seed so discovery does not depend on mDNS:
+
+```sh
+tailscale set --exit-node-allow-lan-access=true
+HYDRA_GOSSIP_SEEDS=<other-node-lan-ip>:7946 ...
+```
 
 ---
 
@@ -41,6 +112,7 @@ In `local` mode the nodes publish themselves over **mDNS** on the LAN and join e
 |---|---------------|---|
 | `ENVIRONMENT` | `local` | `local`, `aws`, `standalone` (alias `single`). Drives provider selection. |
 | `BASE_PORT` | `3128`        | First service port; subsequent NICs get `BASE_PORT + i`. |
+| `HYDRA_INTERFACES` | — | `local` only. Comma-separated interface names to serve, e.g. `en0,utun32`. Each gets `BASE_PORT` + its position in the list, even while another listed one is down. Empty serves every up, non-loopback IPv4 interface. |
 | `CONTROL_PORT` | `9192`        | HTTP control-plane port. |
 | `LOG_LEVEL` | `info`        | `debug`, `info`, `warn`, `error`. |
 
@@ -48,7 +120,7 @@ In `local` mode the nodes publish themselves over **mDNS** on the LAN and join e
 
 | Variable | Default | Description |
 |---|---|---|
-| `HYDRA_NODE_NAME` | `node` | Unique node ID in the cluster. Must differ per instance. |
+| `HYDRA_NODE_NAME` | hostname | Unique node ID in the cluster. Set it when two instances would share a hostname. |
 | `HYDRA_GOSSIP_ADDR` | `0.0.0.0` | Bind address for memberlist. |
 | `HYDRA_GOSSIP_PORT` | `7946` | Gossip port (UDP + TCP). |
 | `HYDRA_GOSSIP_SEEDS` | — | Comma-separated `host:port` list of static seeds. |
@@ -266,6 +338,7 @@ The control-plane listens on `CONTROL_PORT` (default `9192`):
 | `GET` | `/ready` | Readiness, gated by drain state. Returns `503` while draining before shutdown so load balancers stop routing. |
 | `GET` | `/health` | Node health probe: the local node reports healthy with at least one bound interface. |
 | `GET` | `/events`, `/assets/` | Minimal web UI: cluster-events page plus its static assets. |
+| `GET` | `/swagger/index.html` | Swagger UI; the spec generated by `make docs` is at `/swagger/doc.json`. |
 | `*` | `/debug/pprof/*` | Standard `net/http/pprof` handlers (`profile`, `heap`, `goroutine`, `trace`, …). Bind the control port to a private interface or fence with a security group — pprof exposes process internals. |
 
 The forward proxy data-plane listens on `BASE_PORT` (+1 per extra NIC). It accepts standard HTTP forward-proxy and CONNECT requests, honoring these request headers:
@@ -316,6 +389,7 @@ When gossip reports a `NodeJoined` / `NodeLeft` event, the ring adds or removes 
 - `ENVIRONMENT=standalone` runs a single node with no discovery (`NoopSeedProvider`): no mDNS, no Cloud Map. Peers join only via static `HYDRA_GOSSIP_SEEDS`.
 - Running multiple nodes on the same host: give each a different `HYDRA_GOSSIP_PORT`, `BASE_PORT`, `CONTROL_PORT`.
 - Logs are JSON on stderr by default. Pipe through `jq` for readability.
+- Observability and load tests: `make stack-up ORIGIN_HOST=<lan-ip>` starts the OTel Collector, Prometheus, Grafana and a test origin from `docker-compose.yml`; k6 scenarios and how to run them are in [`loadtest/README.md`](loadtest/README.md).
 
 ## TODO
 - https://quic-go.net/docs/

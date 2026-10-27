@@ -38,7 +38,6 @@ func (h *EventsHandler) Events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Clear the server WriteTimeout so long-lived SSE streams survive.
 	_ = rc.SetWriteDeadline(time.Time{})

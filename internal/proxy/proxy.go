@@ -2,18 +2,16 @@ package proxy
 
 import "net/http"
 
-// MeshRouter es el punto de entrada HTTP. Evalúa si la petición
-// se queda o salta a otro nodo.
-type MeshRouter interface {
-	// ServeHTTP implementa http.Handler de la librería estándar de Go.
-	ServeHTTP(w http.ResponseWriter, r *http.Request)
+// Route is the router's verdict for one request. The forwarder logs the
+// decision itself so the completion line states why the bytes left where
+// they did, not a guess rebuilt from the peer address.
+type Route struct {
+	Peer     string // host:port of the hydra proxy to relay through; "" = egress here
+	Decision string
 }
 
-// Forwarder se encarga de mover los bytes de un lado a otro.
+// Forwarder moves the bytes of one request, either straight to the
+// destination or through the hydra proxy named by the route.
 type Forwarder interface {
-	// ForwardToPeer envía la petición internamente a otro Proxy del clúster.
-	ForwardToPeer(targetAddress string, w http.ResponseWriter, r *http.Request)
-
-	// ForwardToExternal envía la petición finalmente hacia internet (o el servicio final).
-	ForwardToExternal(w http.ResponseWriter, r *http.Request)
+	Serve(w http.ResponseWriter, r *http.Request, route Route)
 }

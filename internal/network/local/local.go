@@ -12,55 +12,79 @@ import (
 // Provider discovers network interfaces on the local host.
 type Provider struct {
 	basePort int
+	allow    []string
 }
 
-// NewProvider builds the provider with a base port. Passing 0 falls back
-// to the package default via BuildServicePort.
 func NewProvider(config *hydra.Config) *Provider {
 	return &Provider{
 		basePort: config.BasePort,
+		allow:    config.Interfaces,
 	}
 }
 
-// Discover returns every active (UP) non-loopback interface and assigns
-// sequential service ports starting from the base port.
+// candidate decouples selection from net.Interface so it is testable
+// without real NICs.
+type candidate struct {
+	name  string
+	mac   string
+	flags net.Flags
+	ip    string // first IPv4, "" when none
+	cidr  string
+}
+
 func (p *Provider) Discover() ([]topology.NetworkInterface, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, fmt.Errorf("listing interfaces: %w", err)
 	}
 
-	result := make([]topology.NetworkInterface, 0, len(ifaces))
-	// Counter only for interfaces that pass our filters.
-	validIndex := 0
-
+	all := make([]candidate, 0, len(ifaces))
 	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 {
+		ip, cidr, err := firstIPv4(iface)
+		if err != nil {
 			continue
 		}
-		if iface.Flags&net.FlagUp == 0 {
-			continue
+		all = append(all, candidate{name: iface.Name, mac: iface.HardwareAddr.String(), flags: iface.Flags, ip: ip, cidr: cidr})
+	}
+	return selectInterfaces(all, p.allow, p.basePort), nil
+}
+
+// With an allow list the port follows the list position, so a listed
+// interface that is down (a VPN tunnel) never renumbers the others.
+func selectInterfaces(all []candidate, allow []string, basePort int) []topology.NetworkInterface {
+	usable := func(c candidate) bool {
+		return c.flags&net.FlagUp != 0 && c.flags&net.FlagLoopback == 0 && c.ip != ""
+	}
+	build := func(c candidate, index int) topology.NetworkInterface {
+		return topology.NetworkInterface{
+			Name:        c.name,
+			MAC:         c.mac,
+			PrivateIP:   c.ip,
+			SubnetCIDR:  c.cidr,
+			ServicePort: network.BuildServicePort(basePort, index),
 		}
-
-		privateIP, subnetCIDR, err := firstIPv4(iface)
-		if err != nil || privateIP == "" {
-			continue
-		}
-
-		calculatedPort := network.BuildServicePort(p.basePort, validIndex)
-
-		result = append(result, topology.NetworkInterface{
-			Name:        iface.Name,
-			MAC:         iface.HardwareAddr.String(),
-			PrivateIP:   privateIP,
-			SubnetCIDR:  subnetCIDR,
-			ServicePort: calculatedPort,
-		})
-
-		validIndex++
 	}
 
-	return result, nil
+	var result []topology.NetworkInterface
+	if len(allow) == 0 {
+		for _, c := range all {
+			if usable(c) {
+				result = append(result, build(c, len(result)))
+			}
+		}
+		return result
+	}
+
+	byName := make(map[string]candidate, len(all))
+	for _, c := range all {
+		byName[c.name] = c
+	}
+	for i, name := range allow {
+		if c, ok := byName[name]; ok && usable(c) {
+			result = append(result, build(c, i))
+		}
+	}
+	return result
 }
 
 // firstIPv4 extracts the first valid IPv4 address from an interface.

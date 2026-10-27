@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/norlis/httpgate/presenter"
 	"github.com/norlis/hydra/internal/cluster"
@@ -18,9 +17,6 @@ const (
 	maxResolveBody = 1 << 20
 	// maxResolveIDs caps how many distinct entity ids one request resolves.
 	maxResolveIDs = 10000
-	// nodeIDSep separates a ring virtual id ("dev1::bridge100") into its
-	// logical node name and interface name.
-	nodeIDSep = "::"
 )
 
 var (
@@ -40,8 +36,8 @@ type EntityResolver interface {
 // resolvedNode is the per-entity result: the logical node that owns the
 // entity plus the proxy address reachable for it.
 type resolvedNode struct {
-	NodeID  string `json:"node_id"`
-	Address string `json:"address"`
+	NodeID  string `example:"zero1"                json:"node_id"`
+	Address string `example:"192.168.100.158:3128" json:"address"`
 }
 
 // ResolveHandler answers "which node owns these entity ids?" using the
@@ -53,9 +49,9 @@ type ResolveHandler struct {
 	logger *slog.Logger
 }
 
-// NewResolveHandler takes the concrete *cluster.Ring (fx-provided in
-// cluster/module.go) and stores it behind EntityResolver.
-func NewResolveHandler(ring *cluster.Ring, render *httpx.Render, logger *slog.Logger) *ResolveHandler {
+// NewResolveHandler builds the handler on any EntityResolver; fx supplies
+// the *cluster.Ring through fx.From in httpapi.Module.
+func NewResolveHandler(ring EntityResolver, render *httpx.Render, logger *slog.Logger) *ResolveHandler {
 	return &ResolveHandler{ring: ring, render: render, logger: logger}
 }
 
@@ -72,7 +68,7 @@ func (h *ResolveHandler) Register(mux *http.ServeMux) {
 // @Tags topology
 // @Accept json
 // @Produce json
-// @Param ids body []string true "Entity ids to resolve"
+// @Param ids body []string true "Entity ids to resolve" SchemaExample(["entity-1","entity-2"])
 // @Success 200 {object} map[string]resolvedNode
 // @Failure 400 {object} map[string]string "Invalid body or too many ids"
 // @Failure 503 {object} map[string]string "Ring not converged"
@@ -114,18 +110,8 @@ func (h *ResolveHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 			// skip rather than emit a partial/null entry.
 			continue
 		}
-		result[id] = resolvedNode{NodeID: logicalNodeID(ep.NodeID), Address: ep.ProxyAddr}
+		result[id] = resolvedNode{NodeID: cluster.LogicalNodeID(ep.NodeID), Address: ep.ProxyAddr}
 	}
 
 	h.render.JSON(w, r, result)
-}
-
-// logicalNodeID returns the node name from a ring virtual id, dropping
-// the "::iface" suffix ("dev1::bridge100" -> "dev1"). Ids without the
-// separator are returned unchanged.
-func logicalNodeID(virtualID string) string {
-	if node, _, found := strings.Cut(virtualID, nodeIDSep); found {
-		return node
-	}
-	return virtualID
 }

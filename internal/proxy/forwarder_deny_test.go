@@ -1,10 +1,6 @@
 package proxy
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -14,23 +10,10 @@ import (
 	"github.com/norlis/hydra/internal/proxy/ipcheck"
 	"github.com/norlis/hydra/internal/proxy/limiter"
 	"github.com/norlis/hydra/internal/proxy/metrics"
+	"github.com/norlis/hydra/internal/testlog"
 	"github.com/norlis/hydra/internal/topology"
 	"go.opentelemetry.io/otel/metric/noop"
 )
-
-// findLogLine returns the first JSON log record in buf whose msg equals want.
-func findLogLine(t *testing.T, buf *bytes.Buffer, want string) map[string]any {
-	t.Helper()
-	sc := bufio.NewScanner(buf)
-	for sc.Scan() {
-		var rec map[string]any
-		if json.Unmarshal(sc.Bytes(), &rec) == nil && rec["msg"] == want {
-			return rec
-		}
-	}
-	t.Fatalf("no log line with msg=%q in:\n%s", want, buf.String())
-	return nil
-}
 
 func TestHostOnly(t *testing.T) {
 	t.Parallel()
@@ -78,11 +61,13 @@ func TestHTTPExternalDeniedReturns403(t *testing.T) {
 		t.Fatal(err)
 	}
 	iface := topology.NetworkInterface{Name: "t", PrivateIP: "127.0.0.1", ServicePort: 3128}
-	var logBuf bytes.Buffer
-	f := NewDualForwarder(iface, nil, []int{80, 443}, classifier, nil, limiter.New(0), 0,
-		mtr, slog.New(slog.NewJSONHandler(&logBuf, nil)))
+	logs := testlog.New()
+	f := NewDualForwarder(iface,
+		ForwarderConfig{AllowedPorts: []int{80, 443}},
+		ForwarderDeps{Classifier: classifier, TunnelLimit: limiter.New(0), Metrics: mtr},
+		logs.Logger())
 
-	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9/", http.NoBody) // loopback -> denied
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:9/", http.NoBody) // loopback -> denied
 	rec := httptest.NewRecorder()
 	f.httpExternal(rec, req)
 
@@ -93,14 +78,22 @@ func TestHTTPExternalDeniedReturns403(t *testing.T) {
 		t.Errorf("unexpected deny body: %q", got)
 	}
 
-	rec2 := findLogLine(t, &logBuf, "http ip denied")
-	if rec2["error_source"] != "policy" {
-		t.Errorf("error_source = %v, want policy", rec2["error_source"])
+	var denied []testlog.Entry
+	for _, e := range logs.Entries() {
+		if e.Message == "http ip denied" {
+			denied = append(denied, e)
+		}
 	}
-	if rec2["deny_reason"] != "loopback" {
-		t.Errorf("deny_reason = %v, want loopback", rec2["deny_reason"])
+	if len(denied) != 1 {
+		t.Fatalf("logged %d \"http ip denied\" entries, want exactly 1: %+v", len(denied), logs.Entries())
 	}
-	if rec2["server.address"] != "127.0.0.1:9" {
-		t.Errorf("server.address = %v, want 127.0.0.1:9", rec2["server.address"])
+	for key, want := range map[string]string{
+		"error_source":   "policy",
+		"deny_reason":    "loopback",
+		"server.address": "127.0.0.1:9",
+	} {
+		if got := denied[0].String(key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
 	}
 }

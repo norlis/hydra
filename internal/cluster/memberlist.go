@@ -3,13 +3,14 @@ package cluster
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	stdlog "log"
 	"log/slog"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/memberlist"
@@ -27,10 +28,11 @@ type MemberlistDiscovery struct {
 	cfg          *hydra.Config
 	list         *memberlist.Memberlist
 	eventBus     bus.EventBus
-	netProvider  network.Provider
+	registry     *network.Registry
 	seedProvider SeedProvider
 	log          *slog.Logger
 	stopCh       chan struct{}
+	stopOnce     sync.Once
 	startedAt    *time.Time
 }
 
@@ -38,14 +40,14 @@ type MemberlistDiscovery struct {
 func NewMemberlistDiscovery(
 	cfg *hydra.Config,
 	eventBus bus.EventBus,
-	netProvider network.Provider,
+	registry *network.Registry,
 	seedProvider SeedProvider,
 	log *slog.Logger,
 ) *MemberlistDiscovery {
 	return &MemberlistDiscovery{
 		cfg:          cfg,
 		eventBus:     eventBus,
-		netProvider:  netProvider,
+		registry:     registry,
 		seedProvider: seedProvider,
 		log:          log,
 		stopCh:       make(chan struct{}),
@@ -53,34 +55,17 @@ func NewMemberlistDiscovery(
 	}
 }
 
-// Start initializes the protocol and joins the P2P network. A background
-// auto-join loop keeps healing the membership if peers become reachable
-// after this node started.
+// Start initializes the gossip protocol and returns without touching the
+// network beyond binding the gossip port. Seed resolution and the join
+// itself run in autoJoinLoop so a slow discovery backend or unreachable
+// peers can never block application startup.
 func (m *MemberlistDiscovery) Start() error {
-	// Low-latency defaults tuned for LAN. DefaultWANConfig would be used
-	// for cross-internet topologies.
-	config := memberlist.DefaultLANConfig()
-
-	if strings.EqualFold(m.cfg.Environment, "local") {
-		config = memberlist.DefaultLocalConfig()
-	}
-
 	advertiseAddr, err := m.resolveAdvertiseAddr()
 	if err != nil {
 		// Fail fast if we can't determine the advertise IP.
 		return err
 	}
-
-	// Validation + "disabled" warn already happened at config load;
-	// a decode error here would mean someone mutated cfg afterwards.
-	if key, _ := m.cfg.GossipSecret(); key != nil {
-		config.SecretKey = key
-	}
-
-	config.Name = m.cfg.GossIPNodeName
-	config.BindAddr = m.cfg.GossIPBindAddr
-	config.AdvertiseAddr = advertiseAddr
-	config.BindPort = m.cfg.GossIPBindPort
+	config := gossipConfig(m.cfg, advertiseAddr)
 
 	delegate := &NodeDelegate{
 		eventBus: m.eventBus,
@@ -104,46 +89,60 @@ func (m *MemberlistDiscovery) Start() error {
 	}
 	m.list = list
 
-	// First join attempt is best-effort. Peers may not be up yet; the
-	// auto-join loop below keeps retrying so the cluster converges
-	// regardless of startup ordering.
-	if seeds := m.resolveSeeds(); len(seeds) > 0 {
-		if _, err := m.list.Join(seeds); err != nil {
-			m.log.Warn("initial join failed, will retry in background",
-				slog.Any("seeds", seeds), hlogger.Err(err))
-		}
-	}
-
 	go m.autoJoinLoop()
 	go m.metaRefreshLoop()
 
 	return nil
 }
 
-// Stop shuts the gossip channel down safely.
+// Stop shuts the gossip channel down safely. Calling it more than once is
+// a no-op.
 func (m *MemberlistDiscovery) Stop() error {
-	close(m.stopCh)
-
-	if m.list == nil {
-		return nil
-	}
-	// Announce graceful leave and give the cluster 5s to propagate it.
-	if err := m.list.Leave(5 * time.Second); err != nil {
-		m.log.Warn("graceful leave failed", hlogger.Err(err))
-	}
-	if err := m.list.Shutdown(); err != nil {
-		return fmt.Errorf("memberlist shutdown: %w", err)
-	}
-	return nil
+	var err error
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+		if m.list == nil {
+			return
+		}
+		// Announce graceful leave and give the cluster 5s to propagate it.
+		if leaveErr := m.list.Leave(5 * time.Second); leaveErr != nil {
+			m.log.Warn("graceful leave failed", hlogger.Err(leaveErr))
+		}
+		if shutdownErr := m.list.Shutdown(); shutdownErr != nil {
+			err = fmt.Errorf("memberlist shutdown: %w", shutdownErr)
+		}
+	})
+	return err
 }
 
-// autoJoinLoop periodically re-resolves seeds and calls Join, but only
-// while this node is alone (NumMembers <= 1). Once at least one peer
-// has been discovered, gossip itself maintains membership; running Join
-// again would just be wasted mDNS queries / Cloud Map API calls.
+// gossipConfig builds the memberlist settings for this node.
+func gossipConfig(cfg *hydra.Config, advertiseAddr string) *memberlist.Config {
+	// LAN timings everywhere: memberlist's local profile is meant for
+	// loopback and evicts live nodes on a busy Wi-Fi link.
+	config := memberlist.DefaultLANConfig()
+
+	// Validation + "disabled" warn already happened at config load;
+	// a decode error here would mean someone mutated cfg afterwards.
+	if key, _ := cfg.GossipSecret(); key != nil {
+		config.SecretKey = key
+	}
+
+	config.Name = cfg.GossIPNodeName
+	config.BindAddr = cfg.GossIPBindAddr
+	config.AdvertiseAddr = advertiseAddr
+	config.BindPort = cfg.GossIPBindPort
+	return config
+}
+
+// autoJoinLoop resolves seeds and calls Join right away and then on every
+// tick, but only while this node is alone (NumMembers <= 1). Once at least
+// one peer has been discovered, gossip itself maintains membership;
+// running Join again would just be wasted mDNS queries / Cloud Map calls.
 //
 // The loop wakes back up automatically if the membership ever drops to
 // 1 (last peer left) and resumes seed discovery until a peer is found.
+// The first failure is logged at Warn so operators see it; later retries
+// at Debug to keep the log quiet while peers are still coming up.
 //
 // Trade-off: a split-brain where two healthy clusters never see each
 // other (both sides have NumMembers > 1 but pointed at disjoint peers)
@@ -157,23 +156,34 @@ func (m *MemberlistDiscovery) autoJoinLoop() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	first := true
 	for {
+		if m.list.NumMembers() <= 1 {
+			m.tryJoin(first)
+			first = false
+		}
 		select {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			if m.list.NumMembers() > 1 {
-				// Already part of a cluster; let gossip handle it.
-				continue
-			}
-			seeds := m.resolveSeeds()
-			if len(seeds) == 0 {
-				continue
-			}
-			if _, err := m.list.Join(seeds); err != nil {
-				m.log.Debug("auto-join tick failed", hlogger.Err(err))
-			}
 		}
+	}
+}
+
+// tryJoin resolves seeds and attempts one Join. A failure is logged at
+// Warn on the first attempt and at Debug afterwards.
+func (m *MemberlistDiscovery) tryJoin(first bool) {
+	seeds := m.resolveSeeds()
+	if len(seeds) == 0 {
+		return
+	}
+	if _, err := m.list.Join(seeds); err != nil {
+		level := slog.LevelDebug
+		if first {
+			level = slog.LevelWarn
+		}
+		m.log.Log(context.Background(), level, "join attempt failed, will retry",
+			slog.Any("seeds", seeds), hlogger.Err(err))
 	}
 }
 
@@ -181,9 +191,10 @@ const metaRefreshInterval = 60 * time.Second
 
 // metaRefreshLoop periodically re-broadcasts this node's gossip metadata so
 // runtime interface changes (EIP rotation, ENI re-attach) reach peers and
-// /api/nodes without a restart. UpdateNode re-invokes NodeMeta, which reads
-// the network provider live. Unconditional refresh doubles as anti-entropy:
-// peers converge even if a previous update was lost.
+// /api/nodes without a restart. The registry cache is refreshed first so
+// UpdateNode (which re-invokes NodeMeta) publishes a live view; every
+// other reader of the local node uses the cache. Unconditional refresh
+// doubles as anti-entropy: peers converge even if an update was lost.
 func (m *MemberlistDiscovery) metaRefreshLoop() {
 	ticker := time.NewTicker(metaRefreshInterval)
 	defer ticker.Stop()
@@ -193,6 +204,7 @@ func (m *MemberlistDiscovery) metaRefreshLoop() {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
+			m.registry.Refresh()
 			if err := m.list.UpdateNode(5 * time.Second); err != nil {
 				m.log.Warn("failed to re-broadcast node metadata", hlogger.Err(err))
 			}
@@ -225,7 +237,8 @@ func decodeMember(member *memberlist.Node, logger *slog.Logger) topology.Node {
 			slog.String("addr", member.Addr.String()))
 	}
 	return topology.Node{
-		ID: member.Name,
+		ID:   member.Name,
+		Addr: member.Addr.String(),
 		Interfaces: []topology.NetworkInterface{
 			{
 				Name:      "default",
@@ -250,6 +263,7 @@ func decodePeerMeta(member *memberlist.Node) (topology.Node, bool) {
 		return topology.Node{}, false
 	}
 	node.ID = member.Name
+	node.Addr = member.Addr.String()
 	return node, true
 }
 
@@ -284,16 +298,19 @@ func decodeMeta(meta []byte) ([]byte, error) {
 	return data, nil
 }
 
-// GetLocalNode returns this instance's topology view.
+// GetLocalNode returns this instance's topology view from the registry
+// cache. It never touches the network: health probes, /api/nodes and
+// NodeMeta all call it, and discovery failures are already logged by the
+// registry's refresh loop.
 func (m *MemberlistDiscovery) GetLocalNode() topology.Node {
-	interfaces, err := m.netProvider.Discover()
-	if err != nil {
-		m.log.Error("failed to discover local interfaces", hlogger.Err(err))
-		return topology.Node{ID: m.cfg.GossIPNodeName, Version: version.GitHash}
+	var addr string
+	if primary, ok := m.registry.Primary(); ok {
+		addr = primary.PrivateIP
 	}
 	return topology.Node{
 		ID:         m.cfg.GossIPNodeName,
-		Interfaces: interfaces,
+		Addr:       addr,
+		Interfaces: m.registry.All(),
 		Healthy:    true,
 		LastSeen:   time.Now(),
 		StartedAt:  m.startedAt,
@@ -301,53 +318,47 @@ func (m *MemberlistDiscovery) GetLocalNode() topology.Node {
 	}
 }
 
-// Subscribe delegates subscription to the internal event bus.
-func (m *MemberlistDiscovery) Subscribe() <-chan bus.ClusterEvent {
-	return m.eventBus.Subscribe()
-}
-
-// resolveAdvertiseAddr picks the IP we announce to the cluster by
-// autodiscovering the first valid interface through the network Provider.
+// resolveAdvertiseAddr picks the IP we announce to the cluster: the
+// registry's primary interface.
 func (m *MemberlistDiscovery) resolveAdvertiseAddr() (string, error) {
-	ifaces, err := m.netProvider.Discover()
-	if err != nil {
-		return "", fmt.Errorf("discovering network for AdvertiseAddr: %w", err)
-	}
-
-	if len(ifaces) == 0 {
+	primary, ok := m.registry.Primary()
+	if !ok {
 		return "", errors.New("no interfaces found to autodiscover AdvertiseAddr")
 	}
-
-	addr := ifaces[0].PrivateIP
-	m.log.Info("AdvertiseAddr autodiscovered", slog.String("addr", addr))
-	return addr, nil
+	m.log.Info("AdvertiseAddr autodiscovered", slog.String("addr", primary.PrivateIP))
+	return primary.PrivateIP, nil
 }
 
 // resolveSeeds merges static seeds from configuration with any
 // dynamically discovered ones, deduplicating.
 func (m *MemberlistDiscovery) resolveSeeds() []string {
-	// map[string]struct{} as a zero-cost set.
-	seedSet := make(map[string]struct{})
-
-	for _, s := range m.cfg.GossIPSeeds {
-		seedSet[s] = struct{}{}
-	}
-
+	var discovered []string
 	if m.seedProvider != nil {
-		discovered, err := m.seedProvider.Discover()
+		found, err := m.seedProvider.Discover()
 		if err != nil {
 			m.log.Warn("dynamic seed discovery failed", hlogger.Err(err))
-		} else if len(discovered) > 0 {
-			for _, s := range discovered {
-				seedSet[s] = struct{}{}
-			}
+		} else if len(found) > 0 {
+			discovered = found
 			m.log.Debug("dynamic seeds added", slog.Any("seeds", discovered))
 		}
 	}
+	return mergeSeeds(m.cfg.GossIPSeeds, discovered)
+}
 
-	finalSeeds := make([]string, 0, len(seedSet))
-	for s := range seedSet {
-		finalSeeds = append(finalSeeds, s)
+// mergeSeeds returns the union of both lists without duplicates. Order is
+// not guaranteed; memberlist tries seeds in the order given, so callers
+// must not depend on it.
+func mergeSeeds(static, discovered []string) []string {
+	seedSet := make(map[string]struct{}, len(static)+len(discovered))
+	for _, s := range static {
+		seedSet[s] = struct{}{}
 	}
-	return finalSeeds
+	for _, s := range discovered {
+		seedSet[s] = struct{}{}
+	}
+	out := make([]string, 0, len(seedSet))
+	for s := range seedSet {
+		out = append(out, s)
+	}
+	return out
 }

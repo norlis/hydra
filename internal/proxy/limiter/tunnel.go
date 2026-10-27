@@ -49,7 +49,3 @@ func (t *Tunnel) Release() {
 
 // Active returns a live snapshot of the in-flight count.
 func (t *Tunnel) Active() int64 { return t.active.Load() }
-
-// Limit returns the configured cap (0 == unlimited). Useful for
-// exposing the value as a constant gauge or in /healthz.
-func (t *Tunnel) Limit() int64 { return t.limit }

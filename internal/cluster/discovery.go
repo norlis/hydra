@@ -1,9 +1,6 @@
 package cluster
 
-import (
-	"github.com/norlis/hydra/internal/bus"
-	"github.com/norlis/hydra/internal/topology"
-)
+import "github.com/norlis/hydra/internal/topology"
 
 // Discovery describes how the application interacts with the gossip
 // network.
@@ -20,8 +17,4 @@ type Discovery interface {
 
 	// GetLocalNode returns information about this instance.
 	GetLocalNode() topology.Node
-
-	// Subscribe registers a channel that receives real-time notifications
-	// when a node joins or leaves the cluster.
-	Subscribe() <-chan bus.ClusterEvent
 }

@@ -15,7 +15,8 @@ import (
 //   - env: environment variable name
 //   - envDefault: default value if env var is not set
 //   - required: if "true", returns error when env var is missing and no default
-//   - envSeparator: separator for slice values (default: ",")
+//   - envSeparator: separator for slice values (default: ","); elements are
+//     trimmed and empty ones (trailing or doubled separators) are dropped
 func Parse(v any) error {
 	ptrVal := reflect.ValueOf(v)
 	if ptrVal.Kind() != reflect.Pointer || ptrVal.Elem().Kind() != reflect.Struct {
@@ -215,10 +216,15 @@ func setSliceField(field reflect.Value, value, separator string) error {
 	return nil
 }
 
+// splitAndTrim splits a list value and drops empty elements, so a
+// trailing separator never yields a blank entry (e.g. an empty seed).
 func splitAndTrim(value, separator string) []string {
 	parts := strings.Split(value, separator)
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
+	out := parts[:0]
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
 	}
-	return parts
+	return out
 }

@@ -37,7 +37,7 @@ Each node exposes one proxy listener per network interface (data plane), an HTTP
 
 ### Actions
 
-* Client request arrives with `X-Entity-ID`; the node hashes it on the ring and either serves locally or forwards to the owning peer with `X-Hydra-Hop: 1` (loop prevention; the header is never trusted from clients).
+* Client request arrives with `X-Entity-ID`; the node hashes it on the ring and either serves locally or forwards to the owning peer with `X-Hydra-Hop: 1` (loop prevention). The header only tells the receiving node to process the request locally; it grants nothing: peer hops carry the node's own `Proxy-Authorization` and are authenticated like any client when `HYDRA_PROXY_AUTH_MODE=basic`. A client that forges the header merely opts out of ring routing for its own request.
 * For HTTPS, the node establishes an opaque CONNECT tunnel after validating the destination port allowlist and the SSRF classifier verdict.
 * Every upstream dial passes the SSRF classifier in `net.Dialer.Control` — after DNS resolution, before the SYN.
 
@@ -63,7 +63,7 @@ This self-assessment was created by the Hydra maintainers to perform an internal
 ### Critical
 
 * **SSRF classifier** (`internal/proxy/ipcheck`, enforced at `internal/proxy/forwarder.go:91`): destination IPs are classified after DNS resolution and before the SYN, so DNS rebinding cannot bypass it. Denied by default: RFC 1918, loopback, link-local (incl. AWS IMDS `169.254.169.254`), multicast, reserved/test ranges, CGNAT (`100.64.0.0/10`), IPv4-embedded IPv6 (NAT64 `64:ff9b::/96`, 6to4 `2002::/16`, Teredo `2001::/32`; IPv4-mapped addresses are unmapped before evaluation), and the proxy's own addresses (self-connect denial). `HYDRA_PROXY_DENY_CIDR` adds ranges; `HYDRA_PROXY_ALLOW_CIDR` creates exceptions.
-* **Header sanitization** (`internal/proxy/forwarder.go:432-445`): before any request leaves the proxy, the following are removed: `X-Hydra-Hop` (loop marker — never trusted from clients), `X-Entity-ID` (routing key — not leaked upstream), `Proxy-Authorization`, `Proxy-Connection`, all RFC 7230 hop-by-hop headers (including any header named in `Connection`), plus operator-configured extras (`HYDRA_STRIP_HEADERS`).
+* **Header sanitization** (`internal/proxy/forwarder.go:432-445`): before any request leaves the proxy, the following are removed: `X-Hydra-Hop` (loop marker), `X-Entity-ID` (routing key — not leaked upstream), `Proxy-Authorization`, `Proxy-Connection`, all RFC 7230 hop-by-hop headers (including any header named in `Connection`), plus operator-configured extras (`HYDRA_STRIP_HEADERS`).
 * **Proxy authentication** (`internal/proxy/auth.go`): optional RFC 7617 Basic auth (`HYDRA_PROXY_AUTH_MODE=basic`); credential comparison uses `crypto/subtle.ConstantTimeCompare` (no timing side channel); `Proxy-Authorization` is deleted immediately after validation on every path (CONNECT, plain HTTP, peer relay).
 * **Memory safety**: pure Go with zero uses of the `unsafe` package anywhere in the repo.
 

@@ -1,126 +1,137 @@
 package cluster
 
 import (
-	"fmt"
 	"log/slog"
-	"sync"
+	"strings"
 
 	hydra "github.com/norlis/hydra/internal"
 	"github.com/norlis/hydra/internal/bus"
 	"github.com/norlis/hydra/internal/hash"
+	"github.com/norlis/hydra/internal/topology"
 )
+
+// virtualIDSep joins a node id and an interface name into the ring entry
+// id ("node-a::eth0"). "::" cannot appear in a memberlist node name.
+const virtualIDSep = "::"
 
 // Endpoint is the resolved target returned by the ring for a given
 // entityID: the peer that owns that entity plus a flag telling whether
 // that peer is this node.
 type Endpoint struct {
-	NodeID    string
+	NodeID    string // virtual id: "<node>::<iface>"
+	Iface     string
 	ProxyAddr string // host:port reachable by peers
 	IsSelf    bool
 }
 
-// Ring is a gossip-driven consistent hash ring. It subscribes to the
-// internal event bus at construction time and rebalances itself as
-// nodes join, leave or update.
+// Ring is a gossip-driven consistent hash ring. Every network interface
+// of every member is a separate entry, so a request is pinned to one NIC
+// of one node. It subscribes to the event bus at construction time and
+// rebalances itself as nodes join, leave or update.
 type Ring struct {
 	hash   *hash.ConsistentHashRing
 	selfID string
 	log    *slog.Logger
 
-	mu    sync.RWMutex
-	nodes map[string]string // nodeID -> proxyAddr
+	// bus and events are kept only so Stop can end the run loop.
+	bus    bus.EventBus
+	events <-chan bus.ClusterEvent
 }
 
 // NewRing builds an empty ring and starts the subscription loop.
 func NewRing(cfg *hydra.Config, eventBus bus.EventBus, log *slog.Logger) *Ring {
 	r := &Ring{
-		hash:   hash.NewConsistentHash(50),
+		hash:   hash.NewConsistentHash(hash.DefaultReplicas),
 		selfID: cfg.GossIPNodeName,
 		log:    log,
-		nodes:  make(map[string]string),
+		bus:    eventBus,
+		events: eventBus.Subscribe(),
 	}
-	go r.run(eventBus.Subscribe())
+	go r.run(r.events)
 	return r
 }
 
-// run consumes cluster events and mutates the ring. It exits when the
-// application terminates and the event channel is abandoned.
+// Stop unsubscribes from the bus, which closes the event channel and ends
+// the run loop. The ring keeps serving its last known topology.
+func (r *Ring) Stop() {
+	r.bus.Unsubscribe(r.events)
+}
+
+// run consumes cluster events and mutates the ring until the channel closes.
 func (r *Ring) run(ch <-chan bus.ClusterEvent) {
 	for ev := range ch {
 		switch ev.Type {
 		case bus.NodeJoined, bus.NodeUpdated:
-			// Register each network interface as a separate target in the ring
-			for _, iface := range ev.Node.Interfaces {
-				if iface.PrivateIP == "" || iface.ServicePort == 0 {
-					continue
-				}
-				addr := fmt.Sprintf("%s:%d", iface.PrivateIP, iface.ServicePort)
-
-				// Use a safe separator "::" to avoid conflicts if Node.ID contains hyphens
-				virtualID := fmt.Sprintf("%s::%s", ev.Node.ID, iface.Name)
-				r.replace(virtualID, addr)
-			}
+			r.sync(ev.Node)
 		case bus.NodeLeft:
-			// When a node leaves, remove all its interfaces from the ring
-			for _, iface := range ev.Node.Interfaces {
-				virtualID := fmt.Sprintf("%s::%s", ev.Node.ID, iface.Name)
-				r.remove(virtualID)
-			}
+			// Remove by node id rather than by the interfaces the event
+			// carries: a peer whose metadata could not be decoded arrives
+			// with a stub interface that never matches what was registered.
+			r.removeNode(ev.Node.ID, nil)
 		}
 	}
 }
 
-// replace removes any previous entry for nodeID and adds the new one.
-// This handles NodeUpdated cleanly when a peer's address changes.
-func (r *Ring) replace(nodeID, addr string) {
-	r.mu.Lock()
-	if old, ok := r.nodes[nodeID]; ok && old == addr {
-		r.mu.Unlock()
-		return
+// sync makes the ring hold exactly the interfaces the event lists. A node
+// that restarts with fewer interfaces may never be seen leaving, only
+// joining again, so entries it no longer serves must go here.
+func (r *Ring) sync(node topology.Node) {
+	served := make(map[string]struct{}, len(node.Interfaces))
+	for _, iface := range node.Interfaces {
+		if iface.PrivateIP == "" || iface.ServicePort == 0 {
+			continue
+		}
+		id := VirtualID(node.ID, iface.Name)
+		served[id] = struct{}{}
+		addr := node.ProxyAddress(iface)
+		if r.hash.AddNode(id, addr) {
+			r.log.Debug("ring: node added", slog.String("node", id), slog.String("addr", addr))
+		}
 	}
-	r.nodes[nodeID] = addr
-	r.mu.Unlock()
-
-	r.hash.RemoveNode(nodeID)
-	r.hash.AddNode(nodeID, addr)
-	r.log.Debug("ring: node added", slog.String("node", nodeID), slog.String("addr", addr))
-}
-
-func (r *Ring) remove(nodeID string) {
-	r.mu.Lock()
-	_, existed := r.nodes[nodeID]
-	delete(r.nodes, nodeID)
-	r.mu.Unlock()
-	if existed {
-		r.hash.RemoveNode(nodeID)
-		r.log.Debug("ring: node removed", slog.String("node", nodeID))
+	// No servable interface means undecodable metadata, not an empty node:
+	// keeping the known entries is safer than dropping a live peer.
+	if len(served) > 0 {
+		r.removeNode(node.ID, served)
 	}
 }
 
-// EndpointFor returns the node that owns entityID, or nil when the
-// ring has not yet been populated.
+// removeNode drops every entry of nodeID except those in keep.
+func (r *Ring) removeNode(nodeID string, keep map[string]struct{}) {
+	prefix := nodeID + virtualIDSep
+	for _, id := range r.hash.NodeIDs() {
+		if _, kept := keep[id]; strings.HasPrefix(id, prefix) && !kept {
+			r.hash.RemoveNode(id)
+			r.log.Debug("ring: node removed", slog.String("node", id))
+		}
+	}
+}
+
+// EndpointFor returns the entry that owns entityID, or nil when the ring
+// is empty.
 func (r *Ring) EndpointFor(entityID string) *Endpoint {
-	addr := r.hash.GetTargetNode(entityID)
-	if addr == "" {
+	id, addr, ok := r.hash.GetTargetNode(entityID)
+	if !ok {
 		return nil
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for id, a := range r.nodes {
-		if a == addr {
-			return &Endpoint{
-				NodeID:    id,
-				ProxyAddr: a,
-				IsSelf:    id == r.selfID,
-			}
-		}
-	}
-	return nil
+	node, iface, _ := strings.Cut(id, virtualIDSep)
+	return &Endpoint{NodeID: id, Iface: iface, ProxyAddr: addr, IsSelf: node == r.selfID}
 }
 
-// Len returns the number of real nodes currently in the ring.
+// Len returns the number of entries (node × interface) currently in the ring.
 func (r *Ring) Len() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.nodes)
+	return r.hash.Len()
+}
+
+// VirtualID builds the ring entry id for one interface of a node.
+func VirtualID(nodeID, ifaceName string) string {
+	return nodeID + virtualIDSep + ifaceName
+}
+
+// LogicalNodeID returns the node name from a ring entry id, dropping the
+// "::iface" suffix. Ids without the separator are returned unchanged.
+func LogicalNodeID(virtualID string) string {
+	if node, _, found := strings.Cut(virtualID, virtualIDSep); found {
+		return node
+	}
+	return virtualID
 }

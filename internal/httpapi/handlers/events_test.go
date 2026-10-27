@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,11 +15,11 @@ import (
 // SSE handshake, so we can assert headers + retry deterministically.
 func TestEventsHandshake(t *testing.T) {
 	t.Parallel()
-	h := NewEventsHandler(bus.NewEventBus(), slogDiscard())
+	h := NewEventsHandler(bus.NewEventBus(slog.New(slog.DiscardHandler)), slogDiscard())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/events", http.NoBody).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/events", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	h.Events(rec, req)
@@ -28,5 +29,10 @@ func TestEventsHandshake(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "retry: 5000") {
 		t.Errorf("body missing initial retry line: %q", rec.Body.String())
+	}
+	// The UI is served from this same origin; the stream must not be
+	// readable by arbitrary web pages that can reach the control port.
+	if v := rec.Header().Get("Access-Control-Allow-Origin"); v != "" {
+		t.Errorf("Access-Control-Allow-Origin = %q, want no CORS header", v)
 	}
 }

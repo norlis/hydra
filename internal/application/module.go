@@ -50,7 +50,7 @@ func NewNetworkProvider(cfg *hydra.Config, log *slog.Logger) network.Provider {
 func NewSeedProvider(
 	lc fx.Lifecycle,
 	cfg *hydra.Config,
-	netProvider network.Provider,
+	reg *network.Registry,
 ) (cluster.SeedProvider, error) {
 	switch strings.ToLower(cfg.Environment) {
 	case "local":
@@ -58,7 +58,7 @@ func NewSeedProvider(
 			cfg.GossIPBindPort,
 			cfg.GossIPNodeName,
 			cfg.ClusterTag,
-			resolveAdvertiseIP(netProvider),
+			advertiseIP(reg),
 		), nil
 
 	case "aws":
@@ -66,7 +66,7 @@ func NewSeedProvider(
 			Region:      cfg.CloudMapRegion,
 			Namespace:   cfg.CloudMapNamespace,
 			Service:     cfg.CloudMapService,
-			AdvertiseIP: resolveAdvertiseIP(netProvider),
+			AdvertiseIP: advertiseIP(reg),
 			Port:        cfg.GossIPBindPort,
 			InstanceID:  cfg.GossIPNodeName,
 		})
@@ -84,13 +84,13 @@ func NewSeedProvider(
 	}
 }
 
-// resolveAdvertiseIP returns the IP we'll advertise to peers. On any
-// failure it returns an empty string; providers that depend on it
-// (mDNS, Cloud Map) will fall back to their own defaults.
-func resolveAdvertiseIP(netProvider network.Provider) string {
-	ifaces, err := netProvider.Discover()
-	if err != nil || len(ifaces) == 0 {
+// advertiseIP returns the IP we'll advertise to peers: the registry's
+// primary interface, or "" when nothing was discovered so providers that
+// depend on it (mDNS, Cloud Map) fall back to their own defaults.
+func advertiseIP(reg *network.Registry) string {
+	primary, ok := reg.Primary()
+	if !ok {
 		return ""
 	}
-	return ifaces[0].PrivateIP
+	return primary.PrivateIP
 }

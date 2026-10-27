@@ -2,7 +2,6 @@ package hash
 
 import (
 	"fmt"
-	"maps"
 	"slices"
 	"sort"
 	"sync"
@@ -10,120 +9,125 @@ import (
 	"github.com/cespare/xxhash/v2"
 )
 
-// ConsistentHashRing is a deterministic, immutable consistent hash ring.
+// DefaultReplicas is the number of virtual nodes per real node when the
+// caller passes a non-positive count.
+const DefaultReplicas = 50
+
+// ConsistentHashRing maps keys to nodes with consistent hashing: each node
+// owns `replicas` points on a 64-bit ring and a key belongs to the first
+// node clockwise from its hash. Safe for concurrent use.
 type ConsistentHashRing struct {
 	mu sync.RWMutex
 
-	// vnodes is a sorted slice of every hash on the ring.
+	// vnodes is the sorted set of every point on the ring.
 	vnodes []uint64
 
-	// ring maps a virtual-node hash to its real address (IP:Port).
-	ring map[uint64]string
+	// owners maps a point to the node that owns it.
+	owners map[uint64]string
 
-	// nodeMap tracks real active nodes (NodeID -> Address).
+	// nodeMap tracks the real nodes (nodeID -> address).
 	nodeMap map[string]string
 
-	// replicas is the number of VNodes per real node for this instance.
 	replicas int
 }
 
-// NewConsistentHash creates a new ring. replicas <= 0 falls back to 50.
+// NewConsistentHash creates an empty ring. replicas <= 0 uses DefaultReplicas.
 func NewConsistentHash(replicas int) *ConsistentHashRing {
 	if replicas <= 0 {
-		replicas = 50
+		replicas = DefaultReplicas
 	}
-
 	return &ConsistentHashRing{
 		vnodes:   make([]uint64, 0),
-		ring:     make(map[uint64]string),
+		owners:   make(map[uint64]string),
 		nodeMap:  make(map[string]string),
 		replicas: replicas,
 	}
 }
 
-// AddNode adds a node to the ring, creating its virtual replicas.
-func (c *ConsistentHashRing) AddNode(nodeID, address string) {
+// AddNode registers nodeID at address, creating its virtual points. A node
+// already present with the same address is left untouched; one present
+// with a different address is re-registered. Returns whether the ring
+// changed.
+func (c *ConsistentHashRing) AddNode(nodeID, address string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if _, exists := c.nodeMap[nodeID]; exists {
-		return
+	if old, exists := c.nodeMap[nodeID]; exists {
+		if old == address {
+			return false
+		}
+		c.removeLocked(nodeID)
 	}
 	c.nodeMap[nodeID] = address
-
 	for i := range c.replicas {
-		vnodeKey := fmt.Sprintf("%s-%d", nodeID, i)
-		hash := xxhash.Sum64([]byte(vnodeKey))
-
-		c.vnodes = append(c.vnodes, hash)
-		c.ring[hash] = address
+		point := c.vnodeHash(nodeID, i)
+		c.vnodes = append(c.vnodes, point)
+		c.owners[point] = nodeID
 	}
-
 	slices.Sort(c.vnodes)
+	return true
 }
 
-// RemoveNode removes a node and all its VNodes from the ring.
+// RemoveNode removes a node and all its virtual points. Unknown ids are a
+// no-op.
 func (c *ConsistentHashRing) RemoveNode(nodeID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.removeLocked(nodeID)
+}
 
+func (c *ConsistentHashRing) removeLocked(nodeID string) {
 	if _, exists := c.nodeMap[nodeID]; !exists {
 		return
 	}
 	delete(c.nodeMap, nodeID)
-
 	for i := range c.replicas {
-		vnodeKey := fmt.Sprintf("%s-%d", nodeID, i)
-		hash := xxhash.Sum64([]byte(vnodeKey))
-
-		delete(c.ring, hash)
+		delete(c.owners, c.vnodeHash(nodeID, i))
 	}
-
-	var newVnodes []uint64
-	for _, vnodeHash := range c.vnodes {
-		if _, exists := c.ring[vnodeHash]; exists {
-			newVnodes = append(newVnodes, vnodeHash)
-		}
-	}
-	c.vnodes = newVnodes
+	c.vnodes = slices.DeleteFunc(c.vnodes, func(point uint64) bool {
+		_, kept := c.owners[point]
+		return !kept
+	})
 }
 
-// GetTargetNode always returns the same address for a given entityID
-// (the routing guarantee of consistent hashing).
-func (c *ConsistentHashRing) GetTargetNode(entityID string) string {
+// GetTargetNode returns the node that owns key and its address. ok is
+// false when the ring is empty. The same key always maps to the same node
+// while the membership is unchanged.
+func (c *ConsistentHashRing) GetTargetNode(key string) (nodeID, address string, ok bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	if len(c.vnodes) == 0 {
-		return ""
+		return "", "", false
 	}
-
-	hash := xxhash.Sum64String(entityID)
-
-	idx := sort.Search(len(c.vnodes), func(i int) bool {
-		return c.vnodes[i] >= hash
-	})
-
+	h := xxhash.Sum64String(key)
+	idx := sort.Search(len(c.vnodes), func(i int) bool { return c.vnodes[i] >= h })
 	if idx == len(c.vnodes) {
 		idx = 0
 	}
-
-	return c.ring[c.vnodes[idx]]
+	nodeID = c.owners[c.vnodes[idx]]
+	return nodeID, c.nodeMap[nodeID], true
 }
 
-// GetStats returns a safe snapshot of the ring state.
-func (c *ConsistentHashRing) GetStats() RingStats {
-	// Read-lock to avoid blocking the routing hot path.
+// Len returns the number of real nodes on the ring.
+func (c *ConsistentHashRing) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	return len(c.nodeMap)
+}
 
-	nodesCopy := make(map[string]string, len(c.nodeMap))
-	maps.Copy(nodesCopy, c.nodeMap)
-
-	return RingStats{
-		TotalNodes:      len(c.nodeMap),
-		TotalVNodes:     len(c.vnodes),
-		ReplicasPerNode: c.replicas,
-		ActiveNodes:     nodesCopy,
+// NodeIDs returns a snapshot of the registered node ids, in no particular
+// order.
+func (c *ConsistentHashRing) NodeIDs() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ids := make([]string, 0, len(c.nodeMap))
+	for id := range c.nodeMap {
+		ids = append(ids, id)
 	}
+	return ids
+}
+
+func (c *ConsistentHashRing) vnodeHash(nodeID string, replica int) uint64 {
+	return xxhash.Sum64String(fmt.Sprintf("%s-%d", nodeID, replica))
 }

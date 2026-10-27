@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/norlis/hydra/pkg/env"
@@ -15,15 +16,20 @@ type Config struct {
 	Environment string `env:"ENVIRONMENT"  envDefault:"local"` // aws | local
 	BasePort    int    `env:"BASE_PORT"    envDefault:"3128"`
 	ControlPort string `env:"CONTROL_PORT" envDefault:"9192"`
-	LogLevel    string `env:"LOG_LEVEL"    envDefault:"info"` // debug | info | warn | error
+	// LOG_LEVEL is read directly by cmd/hydra when building the logger, so
+	// Config can itself depend on the logger without a cycle.
 
 	// DrainDelay is how long the /ready probe reports draining (503)
 	// before the control-plane server begins its shutdown, giving a
 	// load balancer time to stop routing new requests to this node.
 	DrainDelay time.Duration `env:"HYDRA_DRAIN_DELAY" envDefault:"5s"`
 
+	// VM bridges and some VPN links cannot egress or be reached by peers,
+	// so the operator chooses which interfaces the node serves.
+	Interfaces []string `env:"HYDRA_INTERFACES" envSeparator:","`
+
 	// Gossip plane (memberlist).
-	GossIPNodeName       string        `env:"HYDRA_NODE_NAME"              envDefault:"node"`
+	GossIPNodeName       string        `env:"HYDRA_NODE_NAME"`
 	GossIPBindAddr       string        `env:"HYDRA_GOSSIP_ADDR"            envDefault:"0.0.0.0"`
 	GossIPBindPort       int           `env:"HYDRA_GOSSIP_PORT"            envDefault:"7946"`
 	GossIPSeeds          []string      `env:"HYDRA_GOSSIP_SEEDS"           envSeparator:","`
@@ -73,9 +79,8 @@ type Config struct {
 	//	none  -> no auth check (default; safe only on a trusted LAN)
 	//	basic -> RFC 7617 Proxy-Authorization with HYDRA_PROXY_AUTH_USER/PASS
 	//
-	// Peer hops (X-Hydra-Hop set) are always exempt — peers are trusted
-	// because the inter-node link is expected to live on a private
-	// interface.
+	// Peer hops are authenticated too: every node in the cluster shares
+	// these credentials and sends them when relaying to a peer.
 	ProxyAuthMode string `env:"HYDRA_PROXY_AUTH_MODE" envDefault:"none"`
 	ProxyAuthUser string `env:"HYDRA_PROXY_AUTH_USER"`
 	ProxyAuthPass string `env:"HYDRA_PROXY_AUTH_PASS"`
@@ -94,6 +99,16 @@ func NewConfigFromEnv(logger *slog.Logger) (*Config, error) {
 	cfg := &Config{}
 	if err := env.Parse(cfg); err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	// A fixed default made every node started without a name collide, and
+	// memberlist silently keeps only one of them; the hostname is distinct
+	// per machine.
+	if cfg.GossIPNodeName == "" {
+		host, err := os.Hostname()
+		if err != nil {
+			return nil, fmt.Errorf("HYDRA_NODE_NAME is not set and the hostname is unavailable: %w", err)
+		}
+		cfg.GossIPNodeName = host
 	}
 	// Validate the gossip secret eagerly. If it's unset, surface that as
 	// a warning here so operators see it at startup; memberlist only

@@ -52,27 +52,14 @@ func (d *NodeDelegate) GetBroadcasts(overhead, limit int) [][]byte {
 	return nil
 }
 
-// LocalState is used to sync full state between nodes.
+// LocalState is memberlist's push/pull payload. Hydra keeps no state
+// beyond NodeMeta, so nothing is exchanged here.
 func (d *NodeDelegate) LocalState(join bool) []byte {
-	// Allow a larger limit for initial sync.
-	return d.NodeMeta(1024 * 10)
+	return nil
 }
 
-// MergeRemoteState is invoked when we receive another node's full state.
-func (d *NodeDelegate) MergeRemoteState(buf []byte, join bool) {
-	raw, err := decodeMeta(buf)
-	if err != nil {
-		d.log.Error("failed to decompress remote state", logger.Err(err))
-		return
-	}
-	var node topology.Node
-	if err := json.Unmarshal(raw, &node); err != nil {
-		d.log.Error("failed to deserialize remote state", logger.Err(err))
-		return
-	}
-	// Hook to update a global node cache.
-	_ = node
-}
+// MergeRemoteState is the counterpart of LocalState; peers send nothing.
+func (d *NodeDelegate) MergeRemoteState(buf []byte, join bool) {}
 
 // NotifyJoin fires when a healthy node joins the network.
 func (d *NodeDelegate) NotifyJoin(node *memberlist.Node) {

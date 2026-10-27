@@ -1,11 +1,11 @@
 package handlers
 
 import (
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 
-	"github.com/norlis/hydra/pkg/logger"
 	"github.com/norlis/hydra/web"
 )
 
@@ -14,17 +14,19 @@ type WebHandler struct {
 	statics http.Handler
 }
 
-func NewWebHandler(log *slog.Logger) *WebHandler {
+// NewWebHandler serves the embedded UI. The error is returned, not logged,
+// so a broken embed fails the fx graph at startup instead of panicking on
+// the first request.
+func NewWebHandler(log *slog.Logger) (*WebHandler, error) {
 	subFs, err := fs.Sub(web.Files, "assets")
 	if err != nil {
-		log.Error("Failed to create sub filesystem for assets", logger.Err(err))
-		return nil
+		return nil, fmt.Errorf("embedded assets: %w", err)
 	}
 
 	return &WebHandler{
 		logger:  log,
 		statics: http.FileServer(http.FS(subFs)),
-	}
+	}, nil
 }
 
 func (h *WebHandler) EventsPage(w http.ResponseWriter, r *http.Request) {

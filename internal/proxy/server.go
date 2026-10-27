@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/netip"
 	"sync"
 	"time"
 
@@ -61,6 +60,7 @@ func StartProxyServers(
 	cfg *hydra.Config,
 	reg *network.Registry,
 	ring *cluster.Ring,
+	classifier *ipcheck.Classifier,
 	tracker *conntrack.Tracker,
 	tunnelLimit *limiter.Tunnel,
 	mtr *metrics.Metrics,
@@ -68,20 +68,6 @@ func StartProxyServers(
 ) error {
 	log = logger.WithComponent(log, logComponent)
 	ifaces := reg.All()
-
-	// Collect this node's local IPs so the classifier can deny
-	// self-connections (a request that resolves back to us).
-	localIPs := make([]netip.Addr, 0, len(ifaces))
-	for _, iface := range ifaces {
-		if ip, err := netip.ParseAddr(iface.PrivateIP); err == nil {
-			localIPs = append(localIPs, ip)
-		}
-	}
-
-	classifier, err := ipcheck.New(cfg.ProxyDenyCIDR, cfg.ProxyAllowCIDR, localIPs)
-	if err != nil {
-		return fmt.Errorf("proxy: building IP classifier: %w", err)
-	}
 
 	// Single ListenConfig shared by every NIC. Building it once keeps
 	// keepalive settings consistent across listeners and lets us bind
@@ -182,9 +168,21 @@ func buildProxyServer(
 	listenCfg net.ListenConfig,
 	log *slog.Logger,
 ) (*http.Server, net.Listener, error) {
-	forwarder := NewDualForwarder(
-		iface, cfg.ProxyStripHeaders, cfg.ProxyAllowedPorts, classifier,
-		tracker, tunnelLimit, cfg.ProxyIdleTimeout, mtr, log,
+	// Peers authenticate against each other with the node's own credential
+	// when proxy auth is on; empty otherwise.
+	var peerAuth string
+	if cfg.ProxyAuthMode == AuthModeBasic {
+		peerAuth = BasicCredential(cfg.ProxyAuthUser, cfg.ProxyAuthPass)
+	}
+	forwarder := NewDualForwarder(iface,
+		ForwarderConfig{
+			StripHeaders: cfg.ProxyStripHeaders,
+			AllowedPorts: cfg.ProxyAllowedPorts,
+			IdleTimeout:  cfg.ProxyIdleTimeout,
+			PeerAuth:     peerAuth,
+		},
+		ForwarderDeps{Classifier: classifier, Tracker: tracker, TunnelLimit: tunnelLimit, Metrics: mtr},
+		log,
 	)
 	router := NewRouter(iface, ring, forwarder, mtr, log)
 

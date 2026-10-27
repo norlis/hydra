@@ -80,6 +80,17 @@ func (r *Registry) All() []topology.NetworkInterface {
 	return cp
 }
 
+// Primary returns the first cached interface, the one whose address the
+// node advertises to peers, or false when nothing has been discovered.
+func (r *Registry) Primary() (topology.NetworkInterface, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.ifaces) == 0 {
+		return topology.NetworkInterface{}, false
+	}
+	return r.ifaces[0], true
+}
+
 // Stop halts the background discovery loop.
 func (r *Registry) Stop() {
 	close(r.stopCh)

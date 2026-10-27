@@ -8,8 +8,8 @@ import (
 )
 
 // Any env without a discovery backend (standalone, single, or an
-// unrecognized value) must resolve to NoopSeedProvider. lc and
-// netProvider are unused on this path.
+// unrecognized value) must resolve to NoopSeedProvider. lc and the
+// registry are unused on this path.
 func TestNewSeedProvider_NoDiscoveryUsesNoop(t *testing.T) {
 	t.Parallel()
 	for _, env := range []string{"standalone", "single", "STANDALONE", "does-not-exist"} {

@@ -21,21 +21,27 @@ const (
 // human-readable handle.
 const proxyAuthRealm = "hydra"
 
+// Sentinel errors returned by WrapAuth so callers can match with errors.Is.
+var (
+	ErrAuthMissingCredentials = errors.New("proxy: basic auth requires user and pass to be set")
+	ErrUnknownAuthMode        = errors.New("proxy: unknown auth mode")
+)
+
 // WrapAuth applies the configured authentication policy in front of
 // next. It returns next unchanged when mode is AuthModeNone so callers
 // don't pay any per-request cost on a wide-open proxy.
 //
-// Peer hops (HopHeader set) are exempt from the check: their
-// authentication is implicit in the inter-node trust boundary, and
-// requiring credentials on every relayed hop would force every node
-// to share secrets that are already distributed by configuration.
+// Peer hops are authenticated like any client: every node shares the
+// same credentials by configuration and sends them on each hop (see
+// BasicCredential), so a client cannot forge the hop header to bypass
+// the check.
 func WrapAuth(mode, user, pass string, next http.Handler, log *slog.Logger) (http.Handler, error) {
 	switch mode {
 	case "", AuthModeNone:
 		return next, nil
 	case AuthModeBasic:
 		if user == "" || pass == "" {
-			return nil, errors.New("proxy: basic auth requires user and pass to be set")
+			return nil, ErrAuthMissingCredentials
 		}
 		return &basicAuth{
 			user:  user,
@@ -45,7 +51,7 @@ func WrapAuth(mode, user, pass string, next http.Handler, log *slog.Logger) (htt
 			log:   log,
 		}, nil
 	default:
-		return nil, fmt.Errorf("proxy: unknown auth mode %q", mode)
+		return nil, fmt.Errorf("%w %q", ErrUnknownAuthMode, mode)
 	}
 }
 
@@ -61,12 +67,6 @@ type basicAuth struct {
 }
 
 func (b *basicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get(HopHeader) != "" {
-		// Peer-relayed request: trust the upstream peer's decision.
-		b.next.ServeHTTP(w, r)
-		return
-	}
-
 	user, pass, ok := parseProxyBasicAuth(r.Header.Get("Proxy-Authorization"))
 	if !ok || !credentialsMatch(b.user, b.pass, user, pass) {
 		b.log.WarnContext(r.Context(), "proxy auth required",
@@ -86,15 +86,26 @@ func (b *basicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	b.next.ServeHTTP(w, r)
 }
 
+// BasicCredential renders the Proxy-Authorization value for user/pass per
+// RFC 7617, or "" when both are empty (no proxy authentication).
+func BasicCredential(user, pass string) string {
+	if user == "" && pass == "" {
+		return ""
+	}
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
+}
+
 // parseProxyBasicAuth extracts the user/pass pair from a
 // Proxy-Authorization header value. Returns ok=false on any decoding
 // or format issue — the caller should treat that as "no auth".
+// The scheme is case-insensitive and may be followed by any amount of
+// whitespace (RFC 7235 §2.1).
 func parseProxyBasicAuth(header string) (user, pass string, ok bool) {
-	const prefix = "Basic "
-	if !strings.HasPrefix(header, prefix) {
+	fields := strings.Fields(header)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Basic") {
 		return "", "", false
 	}
-	raw, err := base64.StdEncoding.DecodeString(header[len(prefix):])
+	raw, err := base64.StdEncoding.DecodeString(fields[1])
 	if err != nil {
 		return "", "", false
 	}

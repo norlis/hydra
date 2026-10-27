@@ -74,19 +74,22 @@ func TestConsistentHashRing_AddRemoveNode(t *testing.T) {
 func TestConsistentHashRing_GetTargetNode(t *testing.T) {
 	t.Parallel()
 
-	ring := NewConsistentHash(50)
-
 	t.Run("empty ring", func(t *testing.T) {
 		t.Parallel()
-		target := ring.GetTargetNode("org-123")
-		if target != "" {
-			t.Errorf("expected empty string, got %s", target)
+		// Own ring: the sibling subtest adds nodes concurrently.
+		ring := NewConsistentHash(50)
+		if id, addr, ok := ring.GetTargetNode("org-123"); ok || id != "" || addr != "" {
+			t.Errorf("expected no owner on an empty ring, got %q %q %v", id, addr, ok)
+		}
+		if ring.Len() != 0 {
+			t.Errorf("Len = %d, want 0", ring.Len())
 		}
 	})
 
 	t.Run("deterministic routing (immutability)", func(t *testing.T) {
 		t.Parallel()
 
+		ring := NewConsistentHash(50)
 		ring.AddNode("nodeA", "10.0.0.1")
 		ring.AddNode("nodeB", "10.0.0.2")
 		ring.AddNode("nodeC", "10.0.0.3")
@@ -95,17 +98,24 @@ func TestConsistentHashRing_GetTargetNode(t *testing.T) {
 		routes := make(map[string]string)
 		for i := range 100 {
 			entityID := fmt.Sprintf("org-%d", i)
-			routes[entityID] = ring.GetTargetNode(entityID)
+			id, addr, ok := ring.GetTargetNode(entityID)
+			if !ok || id == "" || addr == "" {
+				t.Fatalf("entity %s has no owner", entityID)
+			}
+			routes[entityID] = id + "@" + addr
+		}
+		if ring.Len() != 3 {
+			t.Errorf("Len = %d, want 3", ring.Len())
 		}
 
 		// Second pass: immutability guarantees the same results.
 		for i := range 100 {
 			entityID := fmt.Sprintf("org-%d", i)
-			target := ring.GetTargetNode(entityID)
+			id, addr, _ := ring.GetTargetNode(entityID)
 
-			if target != routes[entityID] {
+			if got := id + "@" + addr; got != routes[entityID] {
 				t.Fatalf("immutability failure: entity %s first routed to %s, now to %s",
-					entityID, routes[entityID], target)
+					entityID, routes[entityID], got)
 			}
 		}
 	})
@@ -130,7 +140,7 @@ func TestConsistentHashRing_ConcurrencySafe(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			entityID := fmt.Sprintf("tenant-%d", id)
-			_ = ring.GetTargetNode(entityID)
+			_, _, _ = ring.GetTargetNode(entityID)
 		}(i)
 	}
 
