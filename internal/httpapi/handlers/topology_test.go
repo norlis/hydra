@@ -86,6 +86,51 @@ func TestTopologyHandler_Nodes(t *testing.T) {
 	})
 }
 
+func TestTopologyHandler_PeerOrder(t *testing.T) {
+	t.Parallel()
+	node := func(id, ip string) topology.Node {
+		return topology.Node{ID: id, Interfaces: []topology.NetworkInterface{{Name: "eth0", PrivateIP: ip, ServicePort: 3128}}}
+	}
+	// "self" sorts after every peer, so a plain sort would move it out of first place.
+	local := node("self", "10.0.0.1")
+	active := []topology.Node{node("n3", "10.0.0.3"), local, node("n1", "10.0.0.11"), node("n2", "10.0.0.2")}
+	mux := newTopology(t, stubDiscovery{local: local, active: active})
+
+	t.Run("Nodes lists local first and peers by ID", func(t *testing.T) {
+		t.Parallel()
+		var nodes []topology.Node
+		if err := json.Unmarshal(get(t, mux, "/api/nodes").Body.Bytes(), &nodes); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"self", "n1", "n2", "n3"}
+		if len(nodes) != len(want) {
+			t.Fatalf("nodes = %+v", nodes)
+		}
+		for i, id := range want {
+			if nodes[i].ID != id {
+				t.Errorf("nodes[%d].ID = %q, want %q", i, nodes[i].ID, id)
+			}
+		}
+	})
+
+	t.Run("Proxies follow the same node order", func(t *testing.T) {
+		t.Parallel()
+		var proxies []handlers.ProxyInfo
+		if err := json.Unmarshal(get(t, mux, "/api/proxies").Body.Bytes(), &proxies); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"self", "n1", "n2", "n3"}
+		if len(proxies) != len(want) {
+			t.Fatalf("proxies = %+v", proxies)
+		}
+		for i, id := range want {
+			if proxies[i].NodeID != id {
+				t.Errorf("proxies[%d].NodeID = %q, want %q", i, proxies[i].NodeID, id)
+			}
+		}
+	})
+}
+
 // meshWith returns a discovery whose only node exposes the given proxy address.
 func meshWith(ip string, port int) stubDiscovery {
 	return stubDiscovery{local: topology.Node{ID: "self", Interfaces: []topology.NetworkInterface{{Name: "eth0", PrivateIP: ip, ServicePort: port}}}}

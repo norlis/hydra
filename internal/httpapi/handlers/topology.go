@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -68,6 +70,12 @@ func (h *TopologyHandler) getAllNodes() []topology.Node {
 		}
 		nodes = append(nodes, n)
 	}
+
+	// memberlist reshuffles its member list every probe round; sort peers
+	// so responses are stable across calls.
+	slices.SortFunc(nodes[1:], func(a, b topology.Node) int {
+		return cmp.Compare(a.ID, b.ID)
+	})
 
 	return nodes
 }
