@@ -116,7 +116,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: list of cluster nodes (local + active peers)
+      description: list of cluster nodes (local + active peers), sorted by node ID
       produces:
       - application/json
       responses:
@@ -137,7 +137,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: list of all proxy addresses in the cluster
+      description: list of all proxy addresses in the cluster, sorted by node ID
       produces:
       - application/json
       responses:

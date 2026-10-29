@@ -46,7 +46,7 @@ const docTemplate = `{
         },
         "/api/nodes": {
             "get": {
-                "description": "list of cluster nodes (local + active peers)",
+                "description": "list of cluster nodes (local + active peers), sorted by node ID",
                 "consumes": [
                     "application/json"
                 ],
@@ -78,7 +78,7 @@ const docTemplate = `{
         },
         "/api/proxies": {
             "get": {
-                "description": "list of all proxy addresses in the cluster",
+                "description": "list of all proxy addresses in the cluster, sorted by node ID",
                 "consumes": [
                     "application/json"
                 ],

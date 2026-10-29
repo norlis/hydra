@@ -55,8 +55,7 @@ func (h *TopologyHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/proxies/test", h.TestProxy)
 }
 
-// Always include the local node first so the caller can tell which
-// node served the request without inspecting headers.
+// getAllNodes returns the local node plus active peers, sorted by ID.
 func (h *TopologyHandler) getAllNodes() []topology.Node {
 	active := h.discovery.GetActiveNodes()
 	local := h.discovery.GetLocalNode()
@@ -71,9 +70,10 @@ func (h *TopologyHandler) getAllNodes() []topology.Node {
 		nodes = append(nodes, n)
 	}
 
-	// memberlist reshuffles its member list every probe round; sort peers
-	// so responses are stable across calls.
-	slices.SortFunc(nodes[1:], func(a, b topology.Node) int {
+	// memberlist reshuffles its member list every probe round, and clients
+	// behind a load balancer reach a different node on each call: sort the
+	// whole list so every member returns the same order.
+	slices.SortFunc(nodes, func(a, b topology.Node) int {
 		return cmp.Compare(a.ID, b.ID)
 	})
 
@@ -82,7 +82,7 @@ func (h *TopologyHandler) getAllNodes() []topology.Node {
 
 // Nodes
 // @Summary Nodes
-// @Description list of cluster nodes (local + active peers)
+// @Description list of cluster nodes (local + active peers), sorted by node ID
 // @Tags topology
 // @Accept json
 // @Produce json
@@ -95,7 +95,7 @@ func (h *TopologyHandler) Nodes(w http.ResponseWriter, r *http.Request) {
 
 // Proxies
 // @Summary Proxies
-// @Description list of all proxy addresses in the cluster
+// @Description list of all proxy addresses in the cluster, sorted by node ID
 // @Tags topology
 // @Accept json
 // @Produce json
